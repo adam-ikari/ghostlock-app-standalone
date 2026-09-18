@@ -99,13 +99,21 @@ jobs:
         run: |
           "${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all ghostlock || true
 
+      - name: Rename Release APK
+        run: mv app/build/outputs/apk/release/*.apk GhostLock-release.apk
+
       - name: Prepare extractor binaries
         run: |
           cp tools/extract_rs/target/release/ghostlock-extract tools/extract_rs/ghostlock-extract-linux-x86_64
-          cp tools/extract_rs/target/aarch64-linux-android/release/ghostlock-extract tools/extract_rs/ghostlock-extract-android-arm64
 
-      - name: Rename Release APK
-        run: mv app/build/outputs/apk/release/*.apk GhostLock-release.apk
+          export CC_aarch64_linux_android="${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          export AR_aarch64_linux_android="${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+          export RUSTC_BOOTSTRAP=1
+          export RUSTFLAGS="-C force-unwind-tables=no -C link-arg=-Wl,--icf=all"
+          cargo +ondk build --release --target aarch64-linux-android --features http --manifest-path tools/extract_rs/Cargo.toml \
+            -Z build-std=std,panic_abort -Z build-std-features=optimize_for_size
+          cp tools/extract_rs/target/aarch64-linux-android/release/ghostlock-extract tools/extract_rs/ghostlock-extract-android-arm64
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v7
