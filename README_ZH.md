@@ -33,11 +33,11 @@ GhostLock 利用 CVE-2026-43499 在支持的 Android 内核上获取临时 root�
 
 需要 Android NDK、`make`、Gradle 和 ADB。通过 adb shell 运行时会跳过 App 的 seccomp 绕过阶段。
 
-```powershell
+```sh
 make -C src ghostlock
-./gradlew.bat exportKernelProfiles
+./gradlew exportKernelProfiles
 adb push build/native/ghostlock /data/local/tmp/ghostlock
-adb push build/kernel-profiles/<release>.bin /data/local/tmp/profile.bin
+adb push "build/kernel-profiles/<release>.bin" /data/local/tmp/profile.bin
 adb shell chmod 755 /data/local/tmp/ghostlock
 adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/profile.bin
 ```
@@ -49,12 +49,10 @@ adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/prof
 
 需要 Rust。提取器支持 boot 镜像、完整 OTA ZIP 或 HTTP(S) 链接。
 
-```powershell
-Push-Location tools/extract_rs
-cargo build --release
-Pop-Location
-build/extract/release/ghostlock-extract.exe boot.img --xbl-config xbl_config.img --format conf --out profile.conf
-build/extract/release/ghostlock-extract.exe OTA.zip --format conf --out profile.conf
+```sh
+(cd tools/extract_rs && cargo build --release)
+build/extract/release/ghostlock-extract boot.img --xbl-config xbl_config.img --format conf --out profile.conf
+build/extract/release/ghostlock-extract OTA.zip --format conf --out profile.conf
 ```
 
 在 App 中导入 `profile.conf`。没有 `xbl_config.img` 时省略 `--xbl-config`。若 `remove_waiter()` 已修复，提取器会以退出码 `6` 拒绝该内核。

@@ -33,11 +33,11 @@ See the [MediaTek guide](docs/kernel_profiles/MEDIATEK.md) for image-based addre
 
 Requires the Android NDK, `make`, Gradle, and ADB. An adb shell run skips the app's seccomp bypass stage.
 
-```powershell
+```sh
 make -C src ghostlock
-./gradlew.bat exportKernelProfiles
+./gradlew exportKernelProfiles
 adb push build/native/ghostlock /data/local/tmp/ghostlock
-adb push build/kernel-profiles/<release>.bin /data/local/tmp/profile.bin
+adb push "build/kernel-profiles/<release>.bin" /data/local/tmp/profile.bin
 adb shell chmod 755 /data/local/tmp/ghostlock
 adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/profile.bin
 ```
@@ -49,12 +49,10 @@ adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/prof
 
 Requires Rust. The extractor accepts a boot image, a full OTA ZIP, or an HTTP(S) URL.
 
-```powershell
-Push-Location tools/extract_rs
-cargo build --release
-Pop-Location
-build/extract/release/ghostlock-extract.exe boot.img --xbl-config xbl_config.img --format conf --out profile.conf
-build/extract/release/ghostlock-extract.exe OTA.zip --format conf --out profile.conf
+```sh
+(cd tools/extract_rs && cargo build --release)
+build/extract/release/ghostlock-extract boot.img --xbl-config xbl_config.img --format conf --out profile.conf
+build/extract/release/ghostlock-extract OTA.zip --format conf --out profile.conf
 ```
 
 Import `profile.conf` in the app. Omit `--xbl-config` if you do not have that image. The extractor rejects a patched `remove_waiter()` with exit code `6`.
