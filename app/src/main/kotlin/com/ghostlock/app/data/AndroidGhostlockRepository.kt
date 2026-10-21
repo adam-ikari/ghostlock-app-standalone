@@ -490,11 +490,24 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     dumpRuntimeProfile(archivedLog, writeSidecar, release, pair, runtimeBlob)
                     archivedLog("<b> starting UserService")
                     resetRunState()
-                    shizukuRunner.run(
+                    val code = shizukuRunner.run(
                         pair, safeModeEnabled, forceAttackTest, profileBlob, debugDir,
                         selectedManagerPackage(), archivedLog,
                     ) { step, status ->
                         if (status == "disabled") clearRunState() else applyRunStatus(step, status)
+                    }
+                    if (code == ShizukuExploitRunner.EXIT_USER_SERVICE_UNAVAILABLE) {
+                        /* The Shizuku helper process could not start at all
+                         * (Shizuku#1198: MediaTek/OEM patches break the
+                         * user-service bootstrap). The direct path needs no
+                         * helper, so fall back to it instead of failing the
+                         * whole run. The direct path runs the native binary in
+                         * the app's own process, so it needs the app uid, not
+                         * the shell uid the user service would have provided. */
+                        archivedLog("<b> Shizuku user service unavailable; falling back to the direct path")
+                        runExploitBinary(pair, "libghostlock.so", archivedLog, debugDir, writeSidecar)
+                    } else {
+                        code
                     }
                 }
             }
