@@ -34,44 +34,54 @@
 > 顺序很重要：**先**利用 + late-load（它负责把 ZygiskNext/Vector 跑起来），**后**用管理器装/启用模块。
 > 装了新模块后再点一次 GhostLock 的「执行」也可以（late-load 会重新 apply）。
 
-## ⚠️ Vector daemon 自启 = 反复掉进 recovery（已踩，别再开）
+## Vector（LSPosed 框架）的激活方法 —— 实测结论
 
-Vector 的 daemon 靠「重启 system_server」把服务注进去。**如果 zygote 里没有 ZygiskNext 的注入**，
-它注不进去 → 再重启一次 → 无限循环 → framework 起不来 → Android 的 rescue party
-把机器送进 **recovery**（recovery 里 adbd 是关的 → adb/fastboot 全都够不着，只能长按电源键）。
+### 四个环节
 
-现场表现很容易被误判：**手机从 USB 上「消失」、Windows PnP 里也看不到设备** —— 那不是线坏了，
-是它在 recovery。
+```
+① KernelSU 进内存
+   su -c 'ksud late-load --kmi android14-6.1 --allow-shell'
+   → /proc/modules 出现 kernelsu
 
-> 我们一度把 Vector 的 `service.sh` 改成开机自启（去掉 `unshare` 那行，因为设备上的 toybox
-> `unshare` 不支持 `--propagation`）—— **正是这一改导致后面几次 recovery**。
+② ZygiskNext 守护进程起来
+   su -c 'rm -f /data/adb/zygisksu/znctx; cd /data/adb/modules/zygisksu && (./bin/zygiskd daemon &)'
+   验证：znctl status → modules64:1,zygisk_vector
 
-安全的做法：
+③ zygote 带上注入点
+   正常情况：守护进程起来后它自己处理（zygote_states 会变成 1）
+   必要时：重启 zygote（两个都要杀！只杀 zygote64 本机直接进 recovery）
+   验证：znctl status → zygote_states ≥ 1
 
-- **不要**让 Vector daemon 随 late-load 自动起来：保持模块自带的 `service.sh` 原样
-  （它的 `unshare` 在本机会失败 → daemon 不自启 → 不会重启 system_server）。
-- 要用 LSPosed 栈时，**按这个顺序**手动来：
+④ Vector daemon 起来（它靠重启 system_server 把 VectorService 注进去）
+   su -c 'cd /data/adb/modules/zygisk_vector && (./daemon --system-server-max-retry=3 &)'
+   验证：/data/adb/modules/zygisk_vector/cli status → Framework Version: 2.2 / API Version: 102
+```
 
-  ```sh
-  # ① 先让 ZygiskNext 的 zygiskd 起来并注入正在运行的 zygote
-  su -c '/data/adb/ksu/bin/znctl stop'
-  su -c '/data/adb/ksu/bin/ksud post-fs-data' &      # 等几秒
-  # ② 再 late-load（把模块应用上）
-  su -c '/data/adb/ksu/bin/ksud late-load --kmi android14-6.1 --allow-shell'
-  # ③ 最后手动起 Vector daemon（它会重启一次 system_server；此时 zygote 已被注入 → 一次就成功）
-  su -c 'cd /data/adb/modules/zygisk_vector && ./daemon --system-server-max-retry=3 &'
-  su -c '/data/adb/modules/zygisk_vector/cli status'
-  ```
+### 顺序反了就是 recovery
 
-  顺序反了（新 zygote 没注入 → daemon 注不进 → 循环重启 system_server）就会掉进 recovery。
+④ 必须在 ③ 成功之后：否则 daemon 注不进去 → 反复重启 system_server → framework 起不来 →
+rescue party → **recovery**（recovery 里 adbd 关着，adb/fastboot 全够不着，只能长按电源键）。
 
-## ⚠️ 别只杀 zygote64（本机会直接进 recovery）
+### 实测记录（2026-10-21，3 次尝试）
 
-`kill -9 $(pidof zygote64)` 之后，新的 zygote 确实带上了注入点（`znctl status` → `zygote_states: 1` ✓），
-**但 framework 起不来** → rescue party → recovery。原因是本机还有 32 位的 `zygote` 进程，
-只杀 64 位那个会让两个 zygote 状态不一致，init 拉起新的也救不回来 framework。
+| 尝试 | ② | ③ | ④ | 结果 |
+| --- | --- | --- | --- | --- |
+| 14:20 | ✅ | ✅（zygote 当时是刚 boot 出来的） | ✅ | **成功**：framework 活着，`cli status` 正常，探针模块被识别（`Loading legacy module ...`） |
+| 16:33 | ✅ | ⚠️ 手工只杀 zygote64 | — | framework 没起来 → recovery |
+| 17:2x | ✅（`zygote_states: 1`） | ✅（守护进程自己挂上的） | ✅ | `cli status` 正常（Framework 2.2 / API 102），**但随后 framework 没起来** → 又一次 recovery |
 
-→ 要重启 zygote 就**两个一起杀**（`pidof zygote zygote64`），或者干脆**整机重启**。
+**结论**：Vector 本身能在本机激活（成功那次是真的活了，模块被框架识别），
+但 **④ 的 system_server 重启在本机很不稳**：3 次里 2 次把 framework 弄挂。
+怀疑与「被注入的是不是刚 boot 出来的 zygote」有关（成功那次 zygote 是新的）。
+
+→ 实践建议：**要稳定用 LSPosed 栈，应该在一次干净重启后立刻按 ①②③④ 走**，
+   让守护进程赶在 zygote 之前就位；或者干脆接受「Vector 激活 = 一次框架重启」的代价。
+
+### 与「一键 root app」的关系
+
+app 只负责 root（利用 + late-load），**不碰 LSPosed 栈**：
+Vector 的激活属于独立模块管理器（Vector / LSPosed）那条线的事。
+如果只要临时 root，**不要**起 ④ —— 那一步是本机最不稳的动作。
 
 ## 验证
 
