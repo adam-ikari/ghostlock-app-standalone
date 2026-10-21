@@ -130,3 +130,16 @@ report.rs 注释说明「0x400 是设备的 SLUB stride，不是 BTF sizeof」�
 5. 拿到 uid 0 后再走 KernelSU(ksud late-load) → ZygiskNext → LSPosed（见 brain 页 `temp-root-to-lsposed`）。
 
 > 注意：跑利用前设备上不能有 KernelSU 补丁或已加载的 KernelSU 模块（BakaSU / ReSukiSU / KowSU 同理）。
+
+## 7. 本机构建环境（真机阶段要用的）
+
+| 东西 | 位置 / 做法 |
+| --- | --- |
+| extractor（host） | `cargo +nightly-2026-08-20 build --release`（stable 1.95.0 达不到 `rust-version ≥ 1.97.1`）；产物在 `vendor/ghostlock-app/build/extract/release/ghostlock-extract` |
+| native payload | `ANDROID_NDK_HOME=/home/gem/android-sdk/ondk-r30.1 make -C vendor/ghostlock-app/src ghostlock` → `build/native/ghostlock`（已编译通过，零告警） |
+| app APK | `ONDK_HOME=/home/gem/android-sdk/ondk-r30.1 ANDROID_NDK_HOME=$ONDK_HOME ./gradlew :app:assembleDebug`（本地 NDK 26/27 都编不了 native，见 brain 页 `local-toolchain-gotchas`） |
+| GLK1 profile | `./gradlew :profile-core:exportKernelProfiles` → `build/kernel-profiles/<release>.bin`（72 份，含本项目两份） |
+| CLI 路线 | `./scripts/run-exploit.sh <uname-r>`（推 native + profile.bin 到 `/data/local/tmp` 再跑，日志回收到 `artifacts/logs/`） |
+
+`vendor/ghostlock-app` 的改动落在本地分支 `feat/titan2-profile`（`0b9438f`，基于 pin 的 `d2ab286e`），
+父仓库的 submodule pin 仍指向 `d2ab286e` —— 要不要提 PR 上游 / 更新 pin 由你决定。

@@ -5,7 +5,7 @@ category: reference
 status: active
 tags: [toolchain, ndk, rust, build]
 created: "2026-10-21T03:46:13"
-updated: "2026-10-21T03:46:22"
+updated: "2026-10-21T04:43:06"
 ---
 
 <!-- compiled_truth -->
@@ -47,6 +47,19 @@ rustup toolchain link ondk "$PWD/ondk/toolchains/rust"
 
 （ondk 内的 NDK 版本 ≥ 28 → 没有 `PAGE_SIZE` 宏；且 `aarch64-linux-android35-clang++` 存在。）
 
+### 已在本机落地（2026-10-21）
+
+- ONDK r30.1 解包在 `/home/gem/android-sdk/ondk-r30.1`（396MB，GitHub release 约 10 分钟）。
+- `rustup toolchain link ondk /home/gem/android-sdk/ondk-r30.1/toolchains/rust`
+  → `rustc 1.97.1-nightly (8bab26f4f 2026-07-14)`，满足 extractor 的 rust-version。
+- `ANDROID_NDK_HOME=/home/gem/android-sdk/ondk-r30.1 make -C src ghostlock` **编译通过**（零告警），
+  产物 `vendor/ghostlock-app/build/native/ghostlock`（aarch64，约 1.19MB）。
+- `scripts/build-native.sh` 会自动优先用 `ONDK_HOME`（默认 `/home/gem/android-sdk/ondk-r30.1`）。
+- 另有一条不用 ONDK 的退路：NDK 27 的 `bits/page_size.h` 自己写了开关
+  `__BIONIC_NO_PAGE_SIZE_MACRO`，加上 `-D__BIONIC_NO_PAGE_SIZE_MACRO` 就不定义该宏。
+  但上游 Makefile 的 `CXXFLAGS :=` 是**直接赋值**，命令行 `CXXFLAGS+=...` 不会追加（会整条替换），
+  要用得先读出原值再拼——不如直接上 ONDK。
+
 ## 3. app 的 compileSdk 是 37.2
 
 `app/build.gradle.kts` 用 `compileSdk { version = release(37) { minorApiLevel = 2 } }`，
@@ -59,6 +72,12 @@ rustup toolchain link ondk "$PWD/ondk/toolchains/rust"
 `./gradlew :app:assembleDebug` 里的 `:buildGhostlockExtract` 与手工 `cargo build` 用同一个
 `~/.cargo` package cache，会出现 `Blocking waiting for file lock on package cache`。
 做法：先让手工的 host 构建跑完（或反过来），不要同时跑。
+
+## 5. 交叉编译 Rust 给 Android 的 std 装不上
+
+`rustup target add aarch64-linux-android --toolchain nightly-2026-08-20` 在本机会
+`tls handshake eof`（static.rust-lang.org 拉不动），多次重试也不行。
+解决：用 ONDK 自带的 rust 工具链（gradle 任务在 `ONDK_HOME` 存在时会自动用 `cargo +ondk`）。
 
 
 ## Timeline
@@ -73,4 +92,16 @@ rustup toolchain link ondk "$PWD/ondk/toolchains/rust"
   kind: decision
   summary: "固化本机工具链的三个坑与解法"
   source: "本项目实测（2026-10-21）"
+  affects: [local-toolchain-gotchas]
+
+- time: 2026-10-21T04:43:06
+  kind: decision
+  summary: "记录 ONDK 已就位 + NDK27 的 PAGE_SIZE 官方开关"
+  source: "本机实测（2026-10-21）"
+  affects: [local-toolchain-gotchas]
+
+- time: 2026-10-21T04:43:06
+  kind: evidence
+  summary: "本机 ONDK r30.1 就位：native payload 编译通过（零告警），并记录 NDK27 的 __BIONIC_NO_PAGE_SIZE_MACRO 开关"
+  source: "本机实测"
   affects: [local-toolchain-gotchas]
