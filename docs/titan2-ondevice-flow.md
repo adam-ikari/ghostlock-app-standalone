@@ -104,3 +104,30 @@ app 只需要把两个模块 zip 摆到 runtime home 的 `modules/` 目录。
 只有「一次性把文件弄到手机上」这一步可以省不掉（APK / zip 只能用 PC 或浏览器的下载来搬），
 其余全部可以在手机上完成。仓库里 `docs/titan2-temp-root-guide.md` 里的命令行路线
 （`adb push` + `adb shell`）是给有 PC 的人用的等价物。
+
+## 8.1 验证：模块真的能 hook（2026-10-21 已通过）
+
+`apps/xposed-probe/`（新版 libxposed API 102）装上后：
+
+```
+$ adb shell 'su -c "/data/adb/modules/zygisk_vector/cli modules enable com.example.titan2probe"'
+Enabled: [com.example.titan2probe]
+$ adb shell 'su -c "/data/adb/modules/zygisk_vector/cli scope add com.example.titan2probe com.example.titan2probe/0"'
+Successfully appended 1 apps to com.example.titan2probe scope.
+$ adb shell am start -n com.example.titan2probe/.ProbeActivity
+$ adb shell 'su -c "cat /data/data/com.example.titan2probe/files/hook_marker"'
+hook fired at 1792579371193
+```
+
+**整条链闭环**：GhostLock 利用（uid 0）→ KernelSU late-load → ZygiskNext（zygote 注入）
+→ Vector/LSPosed 2.2（API 102）→ 模块被加载 → hook 真的执行了。
+
+### 探针模块的两个坑（自己写的模块要注意）
+
+1. **新版 libxposed 元数据必须在 APK 根目录**：`META-INF/xposed/{java_init.list,module.prop,scope.list}`，
+   放 `assets/META-INF/xposed/` 框架**认不出来**（日志里是 `Failed to find path of <pkg>`）。
+2. **keystore 要固定**：每次构建重新生成 keystore → 签名变了 → 覆盖安装失败
+   （`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。脚本里用 `apps/xposed-probe/probe.keystore`（不进 build/）。
+3. **Vector 把传统 Xposed API 重定位了**（包名被混淆成 `bckAHJD.Cf.osS.jp.iM.i.*`）→
+   按标准 `de.robv.android.xposed` 写的模块会被加载但抛 `AbstractMethodError`。
+   → 写模块要用**新版** `io.github.libxposed.api`（Maven Central 有 `io.github.libxposed:api:102.0.0`）。

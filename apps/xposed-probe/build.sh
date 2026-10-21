@@ -49,15 +49,16 @@ echo "== 4/6 aapt2 link =="
 
 echo "== 5/6 塞 dex 和模块元信息 =="
 cp "$OUT/dex/classes.dex" "$OUT/classes.dex"
-mkdir -p "$OUT/assets/META-INF/xposed"
-cp "$HERE/assets/META-INF/xposed/"* "$OUT/assets/META-INF/xposed/"
+# 新版 libxposed 模块格式：元数据在 APK **根目录** 的 META-INF/xposed/ 下（不是 assets/）
+mkdir -p "$OUT/META-INF/xposed"
+cp "$HERE/assets/META-INF/xposed/"* "$OUT/META-INF/xposed/"
 cp "$OUT/base.apk" "$OUT/staged.apk"
-(cd "$OUT" && zip -q staged.apk classes.dex assets/META-INF/xposed/java_init.list \
-    assets/META-INF/xposed/scope.list assets/META-INF/xposed/module.prop)
+(cd "$OUT" && zip -q staged.apk classes.dex META-INF/xposed/java_init.list \
+    META-INF/xposed/scope.list META-INF/xposed/module.prop)
 
 echo "== 6/6 对齐 + 签名 =="
 "$BT/zipalign" -f 4 "$OUT/staged.apk" "$OUT/aligned.apk"
-KS="$OUT/probe.keystore"
+KS="$HERE/probe.keystore"   # 固定 keystore：重建后签名不变，才能覆盖安装
 if [ ! -f "$KS" ]; then
   keytool -genkeypair -keystore "$KS" -alias probe -keyalg RSA -keysize 2048 \
     -validity 10000 -storepass android -keypass android \
