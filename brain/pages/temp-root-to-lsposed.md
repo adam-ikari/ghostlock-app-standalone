@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-21T06:28:27"
+updated: "2026-10-21T07:05:10"
 ---
 
 <!-- compiled_truth -->
@@ -80,4 +80,10 @@ graph LR
   kind: evidence
   summary: "真机跑通 临时root → KernelSU late-load → ZygiskNext → Vector(LSPosed 2.2) 框架，模块管理 CLI 可用"
   source: "宿主机真机操作 + 逐段日志"
+  affects: [temp-root-to-lsposed]
+
+- time: 2026-10-21T07:05:10
+  kind: note
+  summary: "踩坑：杀 zygote / Vector daemon 重启 system_server 会让 Titan 2 framework 起不来 → Android rescue party → 掉进 recovery（recovery 的 adbd 关着，adb/fastboot 都够不着，只能物理重启）"
+  source: "真机两轮实验（2026-10-21）"
   affects: [temp-root-to-lsposed]
