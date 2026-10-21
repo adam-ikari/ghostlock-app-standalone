@@ -18,6 +18,19 @@ GhostLock *kernel profile*。
 2. 能取到该内核对应的 `boot.img` / `vendor_boot.img`（解 profile 的输入）；
 3. 物理地址（`kernel_phys_load` / `kernel_phys_offset`）能确定（MTK 与高通不同，DRAM 基址也不同）。
 
+**目前状态（2026-10-21）**：三条前提都已在**离线**层面验证通过，详见
+[`docs/titan2-ghostlock-profile.md`](docs/titan2-ghostlock-profile.md)：
+
+- Titan 2 = MediaTek **MT6878**（Dimensity 7300），国际版固件 = `TEE`；
+- 内核 **6.1**（android14 GKI），两个候选 release：
+  `6.1.145-android14-11-gbd17012cc2f7-ab14044926`（固件 ≥ 1.00.10，含 Android 16 版）
+  与 `6.1.115-android14-11-g6b18f0b574ab-ab12901745`（固件 1.00 / 1.00.07）；
+- 两个内核**都未修补** CVE-2026-43499（`remove_waiter` 仍走原逻辑）；
+- `kernel_phys_load = kernel_phys_offset = 0x40000000`（`vendor_boot.img` 头 + 里面的 DT）；
+- 两份 profile 已写进 `vendor/ghostlock-app` 并登记 `index.conf`。
+
+剩下的只有**真机验证**（上游规矩：没在真机跑通就不算「已支持」）。
+
 ## GhostLock 是什么
 
 - **CVE-2026-43499**：Linux 内核 futex 的 use-after-free，自 2011 年起存在于几乎所有内核发行版；
@@ -36,29 +49,31 @@ GhostLock *kernel profile*。
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| 0 | 取设备事实：`uname -r` / SoC / bootloader 锁定状态 / SELinux / kallsyms 可见性 | ⏳ 待设备接入 |
-| 1 | 取 `boot.img` + `vendor_boot.img`（`fastboot fetch`，只读不解锁） | ⏳ 待阶段 0 |
-| 2 | 用 Rust extractor 生成 profile 骨架，校验字段完整性 | ⏳ |
-| 3 | 补齐物理地址与结构体布局，真机跑通利用 | ⏳ |
+| 0 | 取设备事实：`uname -r` / SoC / bootloader 锁定状态 / SELinux / kallsyms 可见性 | ⏳ 待设备接入（SoC/内核已由固件离线坐实） |
+| 1 | 取 `boot.img` + `vendor_boot.img`（`fastboot fetch`，只读不解锁） | ✅ 已用官方固件包离线取到（免设备） |
+| 2 | 用 Rust extractor 生成 profile 骨架，校验字段完整性 | ✅ 两份候选 release 都已生成并补齐 |
+| 3 | 补齐物理地址与结构体布局，真机跑通利用 | ⏳ 物理地址已补齐；待真机跑通 |
 | 4 | root 后加载 KernelSU（`ksud` late-load）→ ZygiskNext → LSPosed | ⏳ |
-| 5 | 固化：profile 落到 `vendor/ghostlock-app` 并登记 `index.conf`，写复现文档 | ⏳ |
+| 5 | 固化：profile 落到 `vendor/ghostlock-app` 并登记 `index.conf`，写复现文档 | 🟡 profile 与文档已就位，待真机验证后再定「已支持」 |
 
 关键风险点（按可能性排序）：
 
-1. **内核已打补丁** → 漏洞不存在，整条路线作废，只能换别的临时 root 手段。
-2. **拿不到 `boot.img`** → 无法生成 profile（绕法：fastboot fetch / 官方固件包 / 先取得任意 root）。
-3. **内核没有 BTF** → 上游提取器的结构体偏移**全部依赖 BTF**（`resolve_structs(None)` 会把
-   `task_struct` / `cred` 全置空），MTK OEM 内核命中概率高；上游对应的
-   `extractor-no-btf-struct-derivation-plan.md` 至今 **未实现**。绕法：找 MTK 公开内核源码自行算布局，
-   或从镜像机器码反推。
-4. **MTK 物理地址推导不出** → 需要真机 `/proc/iomem`（依赖 root），或换用 app 内高级参数覆盖页迭代。
+1. ~~**内核已打补丁**~~ → 已排除：两个候选内核的 `remove_waiter` 都未修补。
+2. ~~**拿不到 `boot.img`**~~ → 已排除：官方固件包里就有（`fastboot fetch` 只是备选路径）。
+3. ~~**内核没有 BTF**~~ → 已排除：镜像里带 BTF，结构体布局同时有 6.1 家族宏兜底，且与上游已验证
+   6.1 profile 逐字段一致。
+4. ~~**MTK 物理地址推导不出**~~ → 已排除：`vendor_boot.img` 头给内核加载地址、其内 DT 给 DRAM 基址，
+   都是 `0x40000000`。
 5. **真机稳定性** → 利用依赖竞态，MTK 小核/大核调度差异可能让成功率偏低，需要调 `execution` 参数。
+6. **设备固件版本未知** → `uname -r` 到底是 6.1.115 还是 6.1.145，要等设备接入确认（两份 profile 都备好了）。
 
 ## 目录
 
 ```
 scripts/titan2-props.sh        # 阶段 0：一次性收集设备事实（只读）
 scripts/fetch-partitions.sh     # 阶段 1：fastboot fetch boot / vendor_boot
+scripts/fetch-firmware.sh       # 阶段 1（免设备）：从官方固件包取 boot.img / vendor_boot.img
+scripts/remote-zip-extract.py   # 阶段 1 工具：HTTP Range 只取远程 ZIP 里的指定成员
 scripts/extract-profile.sh     # 阶段 2：extractor → profile.conf + 内核分析报告
 scripts/build-native.sh        # 阶段 3：构建 native payload
 scripts/run-exploit.sh         # 阶段 3：CLI 路线在设备上跑利用并回收日志

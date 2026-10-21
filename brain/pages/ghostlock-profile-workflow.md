@@ -5,7 +5,7 @@ category: reference
 status: active
 tags: [ghostlock, profile, mediatek, workflow]
 created: "2026-10-21T03:35:02"
-updated: "2026-10-21T03:41:33"
+updated: "2026-10-21T04:34:15"
 ---
 
 <!-- compiled_truth -->
@@ -48,6 +48,18 @@ updated: "2026-10-21T03:41:33"
 - **警告**：跑利用前不要让内核带上 KernelSU 补丁或已加载 KernelSU 模块（BakaSU / ReSukiSU / KowSU
   同理），会干扰利用；脚本只检查 root 权限，kernel 是否有补丁要自己确认。
 
+### MTK 补充（本项目实测，2026-10-21，Titan 2 / MT6878）
+
+- **`vendor_boot.img` 里还带完整设备树**（Titan 2 上偏移 `0x19ac040`）：`/memory@40000000 reg = <0 0x40000000 0 0x40000000>`
+  → **不用 root 就能拿到 DRAM 基址与大小**，绕开 extractor「MiB 对齐不足以证明基址」的保守判定
+  （`vendor_boot::classify` 只在 `kernel_addr & 0xFFFFF == 0x80000` 时才给 `kernel_phys_offset`）。
+- `vendor_boot.img` 的 `kernel_addr` = **内核物理加载地址**，不是 DRAM 基址；两者相等只是巧合情况下的常见值
+  （MT6878：内核就加载在 DRAM 基址 `0x40000000`）。
+- extractor 的 MTK 兜底模型（`_text - MTK_VADDR_BASE`）在 6.1 上会算成 `0x8000000`（把 KIMAGE 窗口的
+  +8MB 当成了物理偏移），**不要用它**；用 `--vendor-boot` 或 DT。
+- 免设备路径：官方固件包（Google Drive，社区镜像）里有 `boot.img` / `vendor_boot.img`，
+  用 HTTP Range 局部下载即可，不必 `fastboot fetch`、不必解锁 bootloader。
+
 ## 必填字段矩阵（PROFILE_SCHEMA 第 3 节）
 
 三条 route 共同必填：`offset.init_task` / `init_cred` / `root_task_group` / `selinux_enforcing`；
@@ -78,29 +90,6 @@ app → native 走 **GLK1 v2 二进制**（stdin），不是 JSON：magic `0x0D0
 `release` 文本、section 表。CLI 运行用 `--load-prebuilt-profile <bin>`。
 
 
-
-## 利用成功后能反推物理地址（关键闭环）
-
-原生层的 root 脚本在拿到 uid 0 之后会把 `/proc/iomem` 缓存到 app 私有目录
-（`$HOME_DIR/.ghostlock_iomem`，失败则写 `.ghostlock_iomem.new` 后丢弃），
-同时可导出 `/proc/version`、`/proc/cmdline`、`/proc/modules`、`getenforce`、`dmesg`
-到 `--dump-kernel-log` 目录。
-
-这条闭环很重要：
-
-1. 第一次运行若因 `kernel_phys_offset` 猜错而失败（W1 重试到上限 → `Write 1 failed`），
-   **root 脚本仍可能已经把 iomem 缓存写下来了**；
-2. 把该文件喂给提取器：`ghostlock-extract boot.img --iomem .ghostlock_iomem --format conf`，
-   得到带**真实 DRAM 基址**的 profile；
-3. 用新 profile 再跑一次 → W1 成功 → 拿到 root。
-
-另外 root 脚本会按顺序在 `/data/app` 里找 root 管理器自带的 `libksud.so`
-（`me.weishu.kernelsu.pr*` → `me.weishu.kernelsu-*` → `com.resukisu.resukisu*` →
-`org.bakasu.bakasu-*` → `com.kowx712.supermanager*`），找不到则退回
-`/data/local/tmp/ksud` 或 `/data/adb/ksu/bin/ksud`——**所以设备上必须先装一个
-带 `libksud.so` 的 root 管理器**，否则只能拿到 uid 0、装不了 KernelSU 模块。
-
-
 ## Timeline
 
 - time: 2026-10-21T03:35:02
@@ -119,4 +108,16 @@ app → native 走 **GLK1 v2 二进制**（stdin），不是 JSON：magic `0x0D0
   kind: decision
   summary: "补充利用成功后的 iomem 反推闭环与 ksud 查找链"
   source: "上游 src/core/attack/ops.cpp 的 write_root_script()"
+  affects: [ghostlock-profile-workflow]
+
+- time: 2026-10-21T04:34:15
+  kind: decision
+  summary: "补上 MTK 的 DRAM 基址来源：vendor_boot.img 里的 DT"
+  source: "Titan 2 实测：vendor_boot.img 内含完整 DT"
+  affects: [ghostlock-profile-workflow]
+
+- time: 2026-10-21T04:34:15
+  kind: evidence
+  summary: "补记 MTK 的 DRAM 基址来源：vendor_boot.img 内含完整 DT，/memory@<base> 直接给出基址"
+  source: "Titan 2 固件实测"
   affects: [ghostlock-profile-workflow]
