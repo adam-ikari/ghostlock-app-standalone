@@ -1,0 +1,8 @@
+id=com.example.titan2probe
+name=Titan2 Xposed Probe
+version=1.0
+versionCode=1
+author=titan2_temp_root
+description=Verify that LSPosed modules load and hook on the Titan 2
+minApiVersion=102
+targetApiVersion=102
