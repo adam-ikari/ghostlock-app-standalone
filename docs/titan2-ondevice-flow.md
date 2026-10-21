@@ -131,3 +131,26 @@ hook fired at 1792579371193
 3. **Vector 把传统 Xposed API 重定位了**（包名被混淆成 `bckAHJD.Cf.osS.jp.iM.i.*`）→
    按标准 `de.robv.android.xposed` 写的模块会被加载但抛 `AbstractMethodError`。
    → 写模块要用**新版** `io.github.libxposed.api`（Maven Central 有 `io.github.libxposed:api:102.0.0`）。
+
+## 8.2 管理器显示「Vector 异常」（Mismatched）的排查
+
+框架状态枚举里有 `Mismatched`：**框架在跑，但这个管理器跟它对不上话**（binder 的
+`IManagerService` 代次不同 → 每个事务都失败）。
+
+现场（本机）：
+- 18:28 管理器进程被注入了 ✓，但 18:37 日志出现
+  `ipc: daemon transaction failed` + `framework: setting the status notification to true failed`
+  → 管理器首页显示「Vector 异常」。
+- 根因：手机上那个 `org.matrix.vector.manager` 不是**当前框架模块自带的那份**（代次/构建不一致）。
+- 修法：用模块目录里那份重装（注意 `adb pull` 读不到 `/data/adb/...`，要用
+  `adb exec-out su -c 'cat <path>' > out.apk` 才不会混进 shell 的噪声把 apk 弄坏）：
+
+  ```bash
+  adb exec-out su -c 'cat /data/adb/modules/zygisk_vector/manager.apk' > vec-mgr.apk
+  adb install vec-mgr.apk
+  ```
+
+  重装后日志里不再出现 `ipc: daemon transaction failed` ✓。
+
+> 另外：管理器首页还会刷 `store/update: ... unavailable` —— 那是**网络**问题
+> （本机解析不了 backup.modules.lsposed.org / github），与框架注入无关。
