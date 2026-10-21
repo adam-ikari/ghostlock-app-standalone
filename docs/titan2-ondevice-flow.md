@@ -34,23 +34,36 @@
 > 顺序很重要：**先**利用 + late-load（它负责把 ZygiskNext/Vector 跑起来），**后**用管理器装/启用模块。
 > 装了新模块后再点一次 GhostLock 的「执行」也可以（late-load 会重新 apply）。
 
-## 一次性的小修：Vector 的 service.sh
+## ⚠️ Vector daemon 自启 = 反复掉进 recovery（已踩，别再开）
 
-设备上的 toybox `unshare` 不支持 `--propagation`，Vector 模块自带的 `service.sh` 会直接报错，
-daemon 起不来（表现为：管理器连不上框架）。用 root 改一次即可（改完永久有效，模块文件在 `/data` 上）：
+Vector 的 daemon 靠「重启 system_server」把服务注进去。**如果 zygote 里没有 ZygiskNext 的注入**，
+它注不进去 → 再重启一次 → 无限循环 → framework 起不来 → Android 的 rescue party
+把机器送进 **recovery**（recovery 里 adbd 是关的 → adb/fastboot 全都够不着，只能长按电源键）。
 
-```sh
-su -c 'cat > /data/adb/modules/zygisk_vector/service.sh' <<'EOF'
-MODDIR=${0%/*}
-cd "$MODDIR" || exit
-./daemon --system-server-max-retry=3 &
-EOF
-```
+现场表现很容易被误判：**手机从 USB 上「消失」、Windows PnP 里也看不到设备** —— 那不是线坏了，
+是它在 recovery。
 
-改完之后，**每次 late-load 都会自动把 Vector daemon 拉起来**，整条链在手机上闭环。
+> 我们一度把 Vector 的 `service.sh` 改成开机自启（去掉 `unshare` 那行，因为设备上的 toybox
+> `unshare` 不支持 `--propagation`）—— **正是这一改导致后面几次 recovery**。
 
-（这一步需要 root —— 用 GhostLock app 点一次「执行」就有 root 了；
-  改文件本身也可以用手机上的 Shizuku + 任意终端/文件管理器完成。）
+安全的做法：
+
+- **不要**让 Vector daemon 随 late-load 自动起来：保持模块自带的 `service.sh` 原样
+  （它的 `unshare` 在本机会失败 → daemon 不自启 → 不会重启 system_server）。
+- 要用 LSPosed 栈时，**按这个顺序**手动来：
+
+  ```sh
+  # ① 先让 ZygiskNext 的 zygiskd 起来并注入正在运行的 zygote
+  su -c '/data/adb/ksu/bin/znctl stop'
+  su -c '/data/adb/ksu/bin/ksud post-fs-data' &      # 等几秒
+  # ② 再 late-load（把模块应用上）
+  su -c '/data/adb/ksu/bin/ksud late-load --kmi android14-6.1 --allow-shell'
+  # ③ 最后手动起 Vector daemon（它会重启一次 system_server；此时 zygote 已被注入 → 一次就成功）
+  su -c 'cd /data/adb/modules/zygisk_vector && ./daemon --system-server-max-retry=3 &'
+  su -c '/data/adb/modules/zygisk_vector/cli status'
+  ```
+
+  顺序反了（新 zygote 没注入 → daemon 注不进 → 循环重启 system_server）就会掉进 recovery。
 
 ## 验证
 
