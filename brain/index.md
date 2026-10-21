@@ -1,6 +1,6 @@
 # Brain Index
 
-_Auto-generated. Last updated 2026-10-21T08:09:26.337Z._
+_Auto-generated. Last updated 2026-10-21T10:29:05.657Z._
 
 - [ghostlock-cve-2026-43499](pages/ghostlock-cve-2026-43499.md) — category: concept | tags: [ghostlock, exploit, android] | ## 漏洞本体
 - [ghostlock-profile-workflow](pages/ghostlock-profile-workflow.md) — category: reference | tags: [ghostlock, profile, mediatek, workflow] | ## 官方流程（上游 `docs/kernel_profiles/README.md`）

@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, blockers, open-questions]
 created: "2026-10-21T03:35:43"
-updated: "2026-10-21T04:50:22"
+updated: "2026-10-21T10:29:05"
 ---
 
 <!-- compiled_truth -->
@@ -110,4 +110,10 @@ updated: "2026-10-21T04:50:22"
   kind: reversal
   summary: "B1/B2/B3/B6 四条阻塞点全部解除（内核未修补、固件可得、MTK 物理地址已定、BTF 存在），只剩真机验证"
   source: "官方固件实测 + extractor 输出"
+  affects: [porting-blockers]
+
+- time: 2026-10-21T10:29:05
+  kind: evidence
+  summary: "B4 路线在本机不再阻塞：tcp_zerocopy 一次命中；LSPosed 栈也已点亮（Vector 2.2 / API 102 / Enabled Modules 1）"
+  source: "真机验证"
   affects: [porting-blockers]

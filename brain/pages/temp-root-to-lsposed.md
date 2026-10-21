@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-21T07:05:10"
+updated: "2026-10-21T10:29:05"
 ---
 
 <!-- compiled_truth -->
@@ -86,4 +86,10 @@ graph LR
   kind: note
   summary: "踩坑：杀 zygote / Vector daemon 重启 system_server 会让 Titan 2 framework 起不来 → Android rescue party → 掉进 recovery（recovery 的 adbd 关着，adb/fastboot 都够不着，只能物理重启）"
   source: "真机两轮实验（2026-10-21）"
+  affects: [temp-root-to-lsposed]
+
+- time: 2026-10-21T10:29:05
+  kind: evidence
+  summary: "Vector(LSPosed 2.2/API 102) 在 Titan 2 上激活成功；关键：起 Vector daemon 前必须等 zygote 注入稳定 60 秒，否则 framework 挂掉→recovery"
+  source: "真机五步流程（late-load → su 域装模块 → late-load → zygiskd → 等 60s → Vector daemon）"
   affects: [temp-root-to-lsposed]
