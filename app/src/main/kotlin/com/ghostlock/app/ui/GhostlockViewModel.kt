@@ -48,7 +48,7 @@ sealed interface GhostlockEffect {
 private const val OverwriteSummaryLimit = 12
 
 /** Stable ids of the pre-flight checks; the UI maps them to strings. */
-object RunCheckIds {
+internal object RunCheckIds {
     const val KERNEL = "kernel"
     const val PROFILE = "profile"
     const val SHIZUKU_APP = "shizuku_app"
@@ -72,6 +72,8 @@ class GhostlockViewModel(
     private val mutableState = MutableStateFlow(GhostlockUiState())
     private var initialized = false
     private var running = false
+    /** Set when a run reported that the device is already rooted. */
+    private var alreadyRooted = false
     private val loadKernelSnapshot = LoadKernelSnapshotUseCase(repository)
     private val selectCpuPairUseCase = SelectCpuPairUseCase(repository)
     private val importOffsetsUseCase = ImportOffsetsUseCase(repository)
@@ -884,6 +886,7 @@ class GhostlockViewModel(
      */
     private fun noteRootState(line: String) {
         if (!line.contains("already has root")) return
+        alreadyRooted = true
         mutableState.update { state ->
             state.copy(
                 runChecks = state.runChecks.map { check ->
@@ -1204,8 +1207,7 @@ class GhostlockViewModel(
         add(
             com.ghostlock.app.domain.model.RunCheck(
                 id = RunCheckIds.ALREADY_ROOTED,
-                ok = snapshot.rootStatus !=
-                    com.ghostlock.app.domain.model.RootStatus.ROOTED,
+                ok = !alreadyRooted,
                 blocking = false,
             ),
         )

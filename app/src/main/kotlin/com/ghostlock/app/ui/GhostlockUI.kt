@@ -63,6 +63,7 @@ import com.ghostlock.app.data.ManagerScanner
 import com.ghostlock.app.domain.model.CpuPair
 import com.ghostlock.app.domain.model.ExecutionFieldValue
 import com.ghostlock.app.domain.model.ProfileFieldNode
+import com.ghostlock.app.domain.model.RunCheck
 import com.ghostlock.app.domain.model.ShizukuStatus
 import com.ghostlock.app.domain.model.UserProfileFile
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -1034,7 +1035,7 @@ private fun ActivationStatusCard(
  */
 @Composable
 private fun RunCheckCard(
-    checks: List<com.ghostlock.app.domain.model.RunCheck>,
+    checks: List<RunCheck>,
     modifier: Modifier = Modifier,
 ) {
     if (checks.isEmpty()) return

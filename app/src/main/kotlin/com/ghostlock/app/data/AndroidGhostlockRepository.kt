@@ -180,18 +180,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             shizukuStatus = if (shizukuActive) shizukuRunner.status()
             else com.ghostlock.app.domain.model.ShizukuStatus.NOT_REQUIRED,
             shizukuInstalled = isPackageInstalled(ShizukuPackage),
-            rootStatus = com.ghostlock.app.domain.model.RootStatus.UNKNOWN,
         )
     }
 
-    /**
-     * Whether a root shell is already available.
-     *
-     * The shell user can reach `su` once a KernelSU module was late-loaded,
-     * so `su -c id -u` answers the question without any extra privilege.
-     * Without a shell path the answer stays UNKNOWN and the native
-     * pre-attack check decides.
-     */
     /**
      * Stages the Zygisk / LSPosed module zips next to the native runtime home.
      *
@@ -728,6 +719,11 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     environment()["HOME"] = workDir.absolutePath
                     environment()["GHOSTLOCK_KSU_LOG"] = ksuLog.absolutePath
                     if (ksud != null) environment()["GHOSTLOCK_KSUD"] = ksud.absolutePath
+                    /* The native root script looks for the module zips here: it runs
+                     * in the shell domain and cannot read the app's private dir
+                     * on the Shizuku path. */
+                    environment()["GHOSTLOCK_LSPD_MODULES"] =
+                        File(filesDir, LspdStackDirectory).absolutePath
                 }
             onLog("<b> starting native: ${binary.absolutePath}")
             resetRunState()

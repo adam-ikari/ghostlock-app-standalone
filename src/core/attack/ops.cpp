@@ -414,19 +414,17 @@ namespace ghostlock::attack {
              * （app 自己不是 root；Shizuku 每次重启都要重起，不满足「一键」）。
              *
              * 时序（顺序错了会掉进 recovery，务必保持）：
-             *   1) 装模块（app 把 zip 放在 $HOME_DIR/modules）
-             *   2) late-load：把 modules_update 应用到 modules，并跑 stage
-             *   3) 起 ZygiskNext 守护进程 → 它把 Zygisk 注入点挂进 zygote
-             *   4) 等 zygote 真的挂上（zygote_states ≥ 1）
-             *   5) 只有挂上了才起 Vector daemon（它靠重启 system_server 注入服务）
-             * 少一步或顺序反了 → Vector daemon 注不进 → 反复重启 system_server →
-             * framework 起不来 → rescue party → recovery（recovery 里 adbd 关着）。
-             * 所以第 5 步必须带「挂不上就不起」的保护。
+             *   1) late-load 一次 → KernelSU 进内存，shell 用户拿到 su
+             *   2) 装模块（经 su + 已安装那份 ksud；先删旧模块目录）
+             *   3) 再 late-load → 模块被 apply，stage 脚本被跑
+             *   4) 起 ZygiskNext 守护进程 → 它把注入点挂进 zygote
+             *   5) 等 zygote 真的挂上（最长 60s）
+             *   6) 再等 60s 让注入稳定，然后才起 Vector daemon
+             *      （它靠重启 system_server 注入服务；注入没稳就重启 →
+             *       framework 起不来 → rescue party → recovery）
+             * 少一步或顺序反了都会掉进 recovery（recovery 里 adbd 关着，
+             * adb/fastboot 全够不着，只能长按电源键）。
              * 纯字符串改动，不触碰任何攻击代码。 */
-            /* 模块 zip 的位置：先看 native 的 runtime home（app 直接跑时就是
-             * app 的 filesDir），再看环境变量，最后在 /data/data 下按包名找
-             * files/modules（走 Shizuku 路径时 home 在 Shizuku 进程里，app 摆的
-             * 模块只能由 root 这样找回来）。 */
             "MODZIP_DIR=\"\"\n"
             "if [ -d \"$HOME_DIR/modules\" ]; then MODZIP_DIR=\"$HOME_DIR/modules\"; fi\n"
             "if [ -z \"$MODZIP_DIR\" ] && [ -n \"$GHOSTLOCK_LSPD_MODULES\" ]; then\n"
@@ -440,10 +438,20 @@ namespace ghostlock::attack {
             "fi\n"
             "echo \"[*] modules dir=$MODZIP_DIR\" >>\"$LOG\"\n"
             "if [ -n \"$MODZIP_DIR\" ] && [ -d \"$MODZIP_DIR\" ]; then\n"
+            "  echo \"[*] late-load (pre-modules)\" >>\"$LOG\"\n"
+            "  \"$KSUD\" late-load --kmi \"$KMI\" --allow-shell >>\"$LOG\" 2>&1\n"
+            "  echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
+            "  SU=/system/bin/su\n"
+            "  KSU_KSUD=/data/adb/ksu/bin/ksud\n"
             "  for z in \"$MODZIP_DIR\"/*.zip; do\n"
             "    [ -f \"$z\" ] || continue\n"
             "    echo \"[*] installing module $z\" >>\"$LOG\"\n"
-            "    \"$KSUD\" module install \"$z\" >>\"$LOG\" 2>&1\n"
+            "    rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu\n"
+            "    if [ -x \"$SU\" ] && [ -x \"$KSU_KSUD\" ]; then\n"
+            "      \"$SU\" -c \"$KSU_KSUD module install $z\" >>\"$LOG\" 2>&1\n"
+            "    else\n"
+            "      \"$KSUD\" module install \"$z\" >>\"$LOG\" 2>&1\n"
+            "    fi\n"
             "    echo \"[*] module install exit=$?\" >>\"$LOG\"\n"
             "  done\n"
             "  echo \"[*] late-load (modules)\" >>\"$LOG\"\n"
@@ -455,7 +463,7 @@ namespace ghostlock::attack {
             "  ZNCTL=/data/adb/ksu/bin/znctl\n"
             "  ZGONE=0\n"
             "  i=0\n"
-            "  while [ $i -lt 20 ]; do\n"
+            "  while [ $i -lt 60 ]; do\n"
             "    if [ -x \"$ZNCTL\" ] && \"$ZNCTL\" status 2>/dev/null | grep -q 'zygote_states:1'; then\n"
             "      ZGONE=1\n"
             "      break\n"
@@ -465,6 +473,8 @@ namespace ghostlock::attack {
             "  done\n"
             "  echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
             "  if [ \"$ZGONE\" = \"1\" ]; then\n"
+            "    echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
+            "    sleep 60\n"
             "    if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
             "      echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
             "      cd /data/adb/modules/zygisk_vector && ./daemon --system-server-max-retry=3 >>\"$LOG\" 2>&1 &\n"
