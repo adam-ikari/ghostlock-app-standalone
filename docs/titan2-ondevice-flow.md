@@ -9,7 +9,7 @@
 
 | 东西 | 作用 | 怎么来的 |
 | --- | --- | --- |
-| **GhostLock app**（含 Titan 2 profile） | 一键触发利用 + KernelSU late-load | 本仓库构建；上游正式版内置 profile 后直接用正式版 |
+| **「GhostLock Titan 2 版」** | 一键触发利用 + KernelSU late-load；主页有「运行前检查」面板 | 本仓库构建（上游 + Titan 2 profile）；上游正式版内置 profile 后直接用正式版 |
 | **KernelSU 系管理器 APK**（官方 KernelSU v3.3.1，`me.weishu.kernelsu`） | 提供 `ksud`（late-load 要用） | 官方 release；**必须 v3.3.1+**，它才有 `android14-6.1` 的 `kernelsu.ko` |
 | **Vector 管理器 app**（`org.matrix.vector.manager`） | 装/启用 LSPosed 模块、设作用域 | 随 Vector 模块 zip 里的 `manager.apk` |
 | `ZygiskNext-v1.5.2.zip` / `Vector-v2.2.zip` | 放进手机存储（如 `/sdcard/Download/`），供管理器从本地安装 | 官方 release |
@@ -17,7 +17,7 @@
 
 ## 每次开机：一步
 
-1. 打开 **GhostLock** app → 状态卡显示内核受支持 → 点 **执行**。
+1. 打开 **「GhostLock Titan 2 版」** → 先看「运行前检查」面板（缺什么会写清楚）→ 点 **执行**。
 2. 等十几秒，日志里出现：
 
    ```

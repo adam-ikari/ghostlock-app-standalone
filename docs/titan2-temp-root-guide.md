@@ -38,10 +38,14 @@ Titan 2 国际版已知的两个内核（对应固件）：
    [KernelSU](https://github.com/tiann/KernelSU)（包名 `me.weishu.kernelsu`）、
    [BakaSU / ReSukiSU](https://github.com/Baka-SU/BakaSU)、[KowSU](https://github.com/KOWX712/KernelSU) 都行。
    - 选 **v3.3.1 或更新**：release 里有 `lkm-aarch64-android14-6.1_kernelsu.ko`，正好对上 Titan 2 的 KMI。
-2. 装 **GhostLock app**（本仓库构建的 debug 版已经内置 Titan 2 的 profile；
-   上游正式版内置 profile 后就不用专门版本了）。
+2. 装 **「GhostLock Titan 2 版」**（本仓库构建：上游 GhostLock + Titan 2 的 profile + 运行前检查面板；
+   上游正式版内置这份 profile 后就通用）。
 3. 手机若装了 Shizuku，先把 Shizuku 起起来（它就是给 app 一个 shell 身份跑利用，省掉 W3 阶段，更快）。
-4. 打开 GhostLock → 确认状态卡显示「内核受支持」→ 点 **执行**。
+4. 打开 app → 主页有 **「运行前检查」** 面板，逐项列出依赖与系统条件：
+   内核是否受支持 / profile 是否匹配且合法 / Shizuku 是否已装、是否在运行并已授权 /
+   是否装了带 `ksud` 的 KernelSU 管理器。
+   **必须满足的项不满足时按钮是灰的**（app 会说明缺什么）；可选项（如 KernelSU 管理器）
+   不满足时仍能跑，只是拿完 root 不会加载模块。
 5. 日志（`Download/ghostlock-debug-log/<时间>/*.log.txt`）里应该看到：
 
    ```
@@ -56,6 +60,8 @@ Titan 2 国际版已知的两个内核（对应固件）：
    出现 `child is root!` = 临时 root 成功；`KernelSU ready` = KernelSU 已内存加载。
 
 6. 之后 `adb shell su -c id` 就是 `uid=0(root) context=u:r:ksu:s0`。
+
+> app 只负责 root：LSPosed 模块由**独立的模块管理器 app**（Vector / LSPosed）安装与管理。
 
 ## 3. 路线 B：命令行（脚本化 / 无人值守）
 
