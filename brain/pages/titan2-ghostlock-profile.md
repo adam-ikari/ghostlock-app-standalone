@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, profile, mediatek]
 created: "2026-10-21T04:34:00"
-updated: "2026-10-21T06:02:57"
+updated: "2026-10-21T06:08:54"
 ---
 
 <!-- compiled_truth -->
@@ -142,4 +142,10 @@ fallback { to = "select_stack", route { select_stack { waiter_shift = 1 } } }
   kind: evidence
   summary: "真机验证通过：Titan 2（Android 16）上 tcp_zerocopy 一次命中，SELinux 置 permissive + cred 写 uid 0 成功，临时 root 拿到；iomem 复核 DRAM 基址 0x40000000"
   source: "宿主机 adb 真机运行 + 上游 pre-release native + 本项目 GLK1 profile"
+  affects: [titan2-ghostlock-profile]
+
+- time: 2026-10-21T06:08:54
+  kind: evidence
+  summary: "KernelSU late-load 成功：内存加载 android14-6.1_kernelsu.ko，shell 用户拿到 su（uid=0, u:r:ksu:s0），SELinux 恢复 enforcing"
+  source: "宿主机真机：装官方 KernelSU v3.3.1 管理器 + 重跑利用 + ksud late-load --kmi android14-6.1 --allow-shell"
   affects: [titan2-ghostlock-profile]

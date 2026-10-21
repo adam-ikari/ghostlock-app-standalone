@@ -197,25 +197,52 @@ adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/prof
 - native 进程存活期间临时 root 才有效（`root_child` 前端持有 root 凭据）；
   想长期持有就让 KernelSU late-load 成功（见下）。
 
-## 8. 临时 root → LSPosed：还差什么
+## 8. 临时 root → LSPosed
 
-临时 root 已经拿到，剩下的是把 KernelSU 拉起来（late-load），再挂 Xposed 框架：
+### 8.1 KernelSU late-load（已完成 ✅）
 
-1. 装一个 **KernelSU 系管理器 APK**（官方 KernelSU / BakaSU / ReSukiSU / KowSU 均可），
-   它的 `libksud.so` 提供 `ksud`。
-2. 再跑一次利用 → root 脚本会执行
-   `ksud late-load --kmi android14-6.1 --allow-shell`
-   → 内存里加载 `android14-6.1_kernelsu.ko`（不改 boot、不改内核镜像），
-   并把 shell 用户纳入 root（`allow_shell=1`）。
-3. 装 **ZygiskNext**（Zygisk 的独立实现）到 `/data/adb/modules`，
-   再装 **Xposed 框架**（LSPosed 系；Android 16 用维护中的 JingMatrix/Vector）。
-4. 重新触发 `ksud late-load`（或 `ksud soft-reboot`）让模块的 stage 脚本执行，
-   ZygiskNext 的 monitor 会重起 zygote / system_server，注入才生效。
-5. 之后 LSPosed 管理器可用 → 装自己的 hook 模块（本项目要的是给
-   `hwkbd_ime` / `term-ime` / `titan_ir_remote` / `titan_dial` 增强）。
+不改 boot、不改内核镜像，**在内存里**加载 KernelSU：
 
-> 注意：late-load 的 KernelSU 只存在于内存，**重启即失效**；要长期用只能解锁 + 刷 boot
-> （本项目的非目标）。
+1. 装官方 **KernelSU v3.3.1** 管理器 APK（`me.weishu.kernelsu`）——
+   它的 `libksud.so` 内嵌了各 KMI 的 `kernelsu.ko`（release 里有
+   `lkm-aarch64-android14-6.1_kernelsu.ko`，正好对上本机 KMI `android14-6.1`）。
+2. 重跑利用 → root 脚本自动执行：
+
+   ```sh
+   ksud late-load --kmi android14-6.1 --allow-shell
+   ```
+
+   结果：
+
+   ```
+   [*] late-load kmi=android14-6.1
+   [*] late-load exit=0
+   [+] KernelSU module loaded
+   kernelsu 225280 1 - Live 0x0000000000000000 (O)
+   uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
+   ```
+
+3. 效果：shell 用户直接 `su` 就是 root（`allow_shell=1`），
+   `/data/adb/ksu/bin/{ksud,bootctl,busybox,resetprop}` 就位，
+   SELinux 已恢复 enforcing。
+
+> 注意：late-load 的 KernelSU 只在内存里，**重启即失效**（本项目的非目标就是永久 root）。
+
+### 8.2 剩下的：Zygisk + Xposed 框架（进行中）
+
+链路：`ZygiskNext`（Zygisk 的独立实现，提供 Zygisk API）+
+`Vector v2.2`（LSPosed 的继任者，Android 15/16 用的就是它），
+都以 KernelSU 模块的形式装进 `/data/adb/modules`：
+
+```sh
+su -c '/data/adb/ksu/bin/ksud module install /data/local/tmp/zygisknext.zip'
+su -c '/data/adb/ksu/bin/ksud module install /data/local/tmp/vector.zip'
+su -c '/data/adb/ksu/bin/ksud late-load --kmi android14-6.1 --allow-shell'   # 跑模块 stage
+```
+
+要点：Zygisk 的注入只发生在 **fork+exec** 的新进程上，late-load 场景下 zygote /
+system_server 早就在跑了，所以需要让它们重起一次（`ksud soft-reboot` 或模块自己
+respawn），注入才生效。
 
 ## 9. 本机构建环境（真机阶段要用的）
 
