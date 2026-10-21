@@ -8,6 +8,7 @@ import com.ghostlock.app.domain.model.OffsetCandidate
 import com.ghostlock.app.domain.model.OffsetImportResult
 import com.ghostlock.app.domain.model.ParseResult
 import com.ghostlock.app.domain.model.ProfileConfig
+import com.ghostlock.app.domain.model.RootStatus
 import com.ghostlock.app.domain.model.UserProfileFile
 
 interface GhostlockRepository {
@@ -29,6 +30,12 @@ interface GhostlockRepository {
 
     /** All installed non-system apps, compatible-first ordering. */
     suspend fun installedManagers(): List<ManagerScanner.Candidate>
+
+    /**
+     * Whether the device already has a root shell, so a redundant exploit
+     * run can be skipped. UNKNOWN when the app has no way to tell.
+     */
+    suspend fun rootStatus(): RootStatus = RootStatus.UNKNOWN
 
     /**
      * Imports one or more picked documents (file name -> text). Includes are

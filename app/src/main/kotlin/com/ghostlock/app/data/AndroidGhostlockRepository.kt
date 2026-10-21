@@ -174,9 +174,18 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             shizukuStatus = if (shizukuActive) shizukuRunner.status()
             else com.ghostlock.app.domain.model.ShizukuStatus.NOT_REQUIRED,
             shizukuInstalled = isPackageInstalled(ShizukuPackage),
+            rootStatus = com.ghostlock.app.domain.model.RootStatus.UNKNOWN,
         )
     }
 
+    /**
+     * Whether a root shell is already available.
+     *
+     * The shell user can reach `su` once a KernelSU module was late-loaded,
+     * so `su -c id -u` answers the question without any extra privilege.
+     * Without a shell path the answer stays UNKNOWN and the native
+     * pre-attack check decides.
+     */
     /** True when the package is installed (Shizuku ships as its own app). */
     private fun isPackageInstalled(packageName: String): Boolean = runCatching {
         appContext.packageManager.getPackageInfo(packageName, 0)

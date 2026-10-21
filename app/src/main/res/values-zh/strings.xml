@@ -65,6 +65,7 @@
     <string name="check_profile">profile 已匹配且字段合法</string>
     <string name="check_shizuku_app">已安装 Shizuku（独立 app）</string>
     <string name="check_shizuku_ready">Shizuku 正在运行且已授权</string>
+    <string name="check_already_rooted">设备当前不是 root（已 root 会跳过重复利用）</string>
     <string name="check_kernelsu_manager">已安装 KernelSU 管理器（提供 ksud）</string>
     <string name="run_blocked_shizuku">Shizuku 未就绪，请点击状态卡启动或授权</string>
     <string name="export_share">分享偏移</string>

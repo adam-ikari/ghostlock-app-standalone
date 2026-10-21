@@ -65,6 +65,7 @@
     <string name="check_profile">Profile matched and valid</string>
     <string name="check_shizuku_app">Shizuku installed (separate app)</string>
     <string name="check_shizuku_ready">Shizuku running and authorized</string>
+    <string name="check_already_rooted">Device is not rooted yet (a rooted device skips the exploit)</string>
     <string name="check_kernelsu_manager">KernelSU manager installed (supplies ksud)</string>
     <string name="run_blocked_shizuku">Shizuku is not ready; tap the status card to start or authorize</string>
     <string name="export_share">Share offsets</string>

@@ -1065,6 +1065,7 @@ private fun RunCheckCard(
                     RunCheckIds.SHIZUKU_APP -> R.string.check_shizuku_app
                     RunCheckIds.SHIZUKU_READY -> R.string.check_shizuku_ready
                     RunCheckIds.KERNELSU_MANAGER -> R.string.check_kernelsu_manager
+                    RunCheckIds.ALREADY_ROOTED -> R.string.check_already_rooted
                     else -> R.string.check_kernel
                 }
                 val stateRes = if (check.ok) {

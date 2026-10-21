@@ -22,9 +22,20 @@ data class KernelSnapshot(
     val shizukuStatus: ShizukuStatus,
     /** The separate Shizuku app is installed (the one-tap path needs it). */
     val shizukuInstalled: Boolean = false,
+    /** Root shell already available; a redundant exploit run is skipped. */
+    val rootStatus: RootStatus = RootStatus.UNKNOWN,
 )
 
 enum class ShizukuStatus { NOT_REQUIRED, NOT_RUNNING, PERMISSION_REQUIRED, READY }
+
+/**
+ * Whether the device already offers a root shell.
+ *
+ * [UNKNOWN] means the app cannot tell (no shell access); the run then relies
+ * on the native pre-attack check, which skips the exploit when a KernelSU
+ * module is already loaded.
+ */
+enum class RootStatus { UNKNOWN, NOT_ROOTED, ROOTED }
 
 /**
  * One pre-flight requirement of the one-tap run.

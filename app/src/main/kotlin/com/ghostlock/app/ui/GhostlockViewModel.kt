@@ -54,6 +54,7 @@ object RunCheckIds {
     const val SHIZUKU_APP = "shizuku_app"
     const val SHIZUKU_READY = "shizuku_ready"
     const val KERNELSU_MANAGER = "kernelsu_manager"
+    const val ALREADY_ROOTED = "already_rooted"
 }
 
 enum class DocumentRequest { ImportOffsetsHocon, ImportOffsetsJson, BootImage, XblImage, PayloadImage, UefiImage, VendorBootImage }
@@ -876,6 +877,26 @@ class GhostlockViewModel(
 
     fun onRun() = runExploit()
 
+    /**
+     * The native pre-attack check skips the exploit when a KernelSU module is
+     * already loaded; that line is the only reliable "already rooted" signal
+     * the app can see without a shell, so it is folded into the checks.
+     */
+    private fun noteRootState(line: String) {
+        if (!line.contains("already has root")) return
+        mutableState.update { state ->
+            state.copy(
+                runChecks = state.runChecks.map { check ->
+                    if (check.id == RunCheckIds.ALREADY_ROOTED) {
+                        check.copy(ok = false)
+                    } else {
+                        check
+                    }
+                },
+            )
+        }
+    }
+
     /** Explains why the run button is greyed out. */
     fun onProfileInvalid() {
         val state = state.value
@@ -1177,6 +1198,14 @@ class GhostlockViewModel(
             com.ghostlock.app.domain.model.RunCheck(
                 id = RunCheckIds.KERNELSU_MANAGER,
                 ok = managers.any { it.hasKsud },
+                blocking = false,
+            ),
+        )
+        add(
+            com.ghostlock.app.domain.model.RunCheck(
+                id = RunCheckIds.ALREADY_ROOTED,
+                ok = snapshot.rootStatus !=
+                    com.ghostlock.app.domain.model.RootStatus.ROOTED,
                 blocking = false,
             ),
         )
@@ -1578,6 +1607,7 @@ class GhostlockViewModel(
     }
 
     private fun appendLog(line: String) {
+        noteRootState(line)
         /* The final result lines are Kotlin-side; tag them so they read as <k>. */
         val tagged = if (line.startsWith("result:")) "<k> $line" else line
         val entry = formatLog(tagged)
