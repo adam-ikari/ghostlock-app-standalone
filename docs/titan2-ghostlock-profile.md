@@ -137,7 +137,7 @@ report.rs 注释说明「0x400 是设备的 SLUB stride，不是 BTF sizeof」�
 | --- | --- |
 | extractor（host） | `cargo +nightly-2026-08-20 build --release`（stable 1.95.0 达不到 `rust-version ≥ 1.97.1`）；产物在 `vendor/ghostlock-app/build/extract/release/ghostlock-extract` |
 | native payload | `ANDROID_NDK_HOME=/home/gem/android-sdk/ondk-r30.1 make -C vendor/ghostlock-app/src ghostlock` → `build/native/ghostlock`（已编译通过，零告警） |
-| app APK | `ONDK_HOME=/home/gem/android-sdk/ondk-r30.1 ANDROID_NDK_HOME=$ONDK_HOME ./gradlew :app:assembleDebug`（本地 NDK 26/27 都编不了 native，见 brain 页 `local-toolchain-gotchas`） |
+| app APK | `ONDK_HOME=/home/gem/android-sdk/ondk-r30.1 ANDROID_NDK_HOME=$ONDK_HOME ./gradlew :app:assembleDebug`（本地 NDK 26/27 都编不了 native，见 brain 页 `local-toolchain-gotchas`）；产物 `build/app/outputs/apk/debug/GhostLock-v1.2(581)-arm64-v8a-debug.apk`（21MB，内含 `libghostlock.so`、`libextract.so` 与本项目两份 profile） |
 | GLK1 profile | `./gradlew :profile-core:exportKernelProfiles` → `build/kernel-profiles/<release>.bin`（72 份，含本项目两份） |
 | CLI 路线 | `./scripts/run-exploit.sh <uname-r>`（推 native + profile.bin 到 `/data/local/tmp` 再跑，日志回收到 `artifacts/logs/`） |
 
