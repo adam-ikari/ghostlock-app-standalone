@@ -65,6 +65,14 @@ Vector 的 daemon 靠「重启 system_server」把服务注进去。**如果 zyg
 
   顺序反了（新 zygote 没注入 → daemon 注不进 → 循环重启 system_server）就会掉进 recovery。
 
+## ⚠️ 别只杀 zygote64（本机会直接进 recovery）
+
+`kill -9 $(pidof zygote64)` 之后，新的 zygote 确实带上了注入点（`znctl status` → `zygote_states: 1` ✓），
+**但 framework 起不来** → rescue party → recovery。原因是本机还有 32 位的 `zygote` 进程，
+只杀 64 位那个会让两个 zygote 状态不一致，init 拉起新的也救不回来 framework。
+
+→ 要重启 zygote 就**两个一起杀**（`pidof zygote zygote64`），或者干脆**整机重启**。
+
 ## 验证
 
 ```sh
