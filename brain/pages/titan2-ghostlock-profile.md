@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, profile, mediatek]
 created: "2026-10-21T04:34:00"
-updated: "2026-10-21T04:34:00"
+updated: "2026-10-21T04:49:49"
 ---
 
 <!-- compiled_truth -->
@@ -86,4 +86,10 @@ fallback { to = "select_stack", route { select_stack { waiter_shift = 1 } } }
   kind: decision
   summary: "生成 Titan 2 两份 kernel profile（6.1.145 / 6.1.115），route 取 tcp_zerocopy 主路 + select_stack 回落，通过上游单测，待真机验证"
   source: "extractor + vendor_boot 头/DT + BuiltinProfilesTest"
+  affects: [titan2-ghostlock-profile]
+
+- time: 2026-10-21T04:49:49
+  kind: evidence
+  summary: "APK 构建通过：含 libghostlock.so / libextract.so 与两份 Titan 2 profile；native payload 零告警编译通过"
+  source: "ONDK r30.1 + gradle assembleDebug"
   affects: [titan2-ghostlock-profile]
