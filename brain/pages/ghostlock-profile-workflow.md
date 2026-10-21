@@ -5,7 +5,7 @@ category: reference
 status: active
 tags: [ghostlock, profile, mediatek, workflow]
 created: "2026-10-21T03:35:02"
-updated: "2026-10-21T03:35:14"
+updated: "2026-10-21T03:41:33"
 ---
 
 <!-- compiled_truth -->
@@ -78,6 +78,29 @@ app → native 走 **GLK1 v2 二进制**（stdin），不是 JSON：magic `0x0D0
 `release` 文本、section 表。CLI 运行用 `--load-prebuilt-profile <bin>`。
 
 
+
+## 利用成功后能反推物理地址（关键闭环）
+
+原生层的 root 脚本在拿到 uid 0 之后会把 `/proc/iomem` 缓存到 app 私有目录
+（`$HOME_DIR/.ghostlock_iomem`，失败则写 `.ghostlock_iomem.new` 后丢弃），
+同时可导出 `/proc/version`、`/proc/cmdline`、`/proc/modules`、`getenforce`、`dmesg`
+到 `--dump-kernel-log` 目录。
+
+这条闭环很重要：
+
+1. 第一次运行若因 `kernel_phys_offset` 猜错而失败（W1 重试到上限 → `Write 1 failed`），
+   **root 脚本仍可能已经把 iomem 缓存写下来了**；
+2. 把该文件喂给提取器：`ghostlock-extract boot.img --iomem .ghostlock_iomem --format conf`，
+   得到带**真实 DRAM 基址**的 profile；
+3. 用新 profile 再跑一次 → W1 成功 → 拿到 root。
+
+另外 root 脚本会按顺序在 `/data/app` 里找 root 管理器自带的 `libksud.so`
+（`me.weishu.kernelsu.pr*` → `me.weishu.kernelsu-*` → `com.resukisu.resukisu*` →
+`org.bakasu.bakasu-*` → `com.kowx712.supermanager*`），找不到则退回
+`/data/local/tmp/ksud` 或 `/data/adb/ksu/bin/ksud`——**所以设备上必须先装一个
+带 `libksud.so` 的 root 管理器**，否则只能拿到 uid 0、装不了 KernelSU 模块。
+
+
 ## Timeline
 
 - time: 2026-10-21T03:35:02
@@ -90,4 +113,10 @@ app → native 走 **GLK1 v2 二进制**（stdin），不是 JSON：magic `0x0D0
   kind: decision
   summary: "固化 profile 生成/校验流程与 MediaTek 特殊项"
   source: "上游 docs/kernel_profiles/*"
+  affects: [ghostlock-profile-workflow]
+
+- time: 2026-10-21T03:41:33
+  kind: decision
+  summary: "补充利用成功后的 iomem 反推闭环与 ksud 查找链"
+  source: "上游 src/core/attack/ops.cpp 的 write_root_script()"
   affects: [ghostlock-profile-workflow]

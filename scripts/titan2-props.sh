@@ -82,6 +82,8 @@ section "partitions (boot / vendor_boot are what the extractor needs)"
 run "$ADB" shell ls -l /dev/block/by-name/boot
 run "$ADB" shell ls -l /dev/block/by-name/vendor_boot
 run "$ADB" shell ls /dev/block/by-name
+run "$ADB" shell "cat /dev/block/by-name/boot >/dev/null 2>&1 && echo BOOT-READABLE || echo BOOT-NOT-READABLE"
+run "$ADB" shell "cat /dev/block/by-name/vendor_boot >/dev/null 2>&1 && echo VENDOR_BOOT-READABLE || echo VENDOR_BOOT-NOT-READABLE"
 
 section "modules / kernel build info"
 run "$ADB" shell cat /proc/modules

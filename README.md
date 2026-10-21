@@ -47,17 +47,24 @@ GhostLock *kernel profile*。
 
 1. **内核已打补丁** → 漏洞不存在，整条路线作废，只能换别的临时 root 手段。
 2. **拿不到 `boot.img`** → 无法生成 profile（绕法：fastboot fetch / 官方固件包 / 先取得任意 root）。
-3. **MTK 物理地址推导不出** → 需要真机 `/proc/iomem`（依赖 root），或换用 app 内高级参数覆盖页迭代。
-4. **真机稳定性** → 利用依赖竞态，MTK 小核/大核调度差异可能让成功率偏低，需要调 `execution` 参数。
+3. **内核没有 BTF** → 上游提取器的结构体偏移**全部依赖 BTF**（`resolve_structs(None)` 会把
+   `task_struct` / `cred` 全置空），MTK OEM 内核命中概率高；上游对应的
+   `extractor-no-btf-struct-derivation-plan.md` 至今 **未实现**。绕法：找 MTK 公开内核源码自行算布局，
+   或从镜像机器码反推。
+4. **MTK 物理地址推导不出** → 需要真机 `/proc/iomem`（依赖 root），或换用 app 内高级参数覆盖页迭代。
+5. **真机稳定性** → 利用依赖竞态，MTK 小核/大核调度差异可能让成功率偏低，需要调 `execution` 参数。
 
 ## 目录
 
 ```
 scripts/titan2-props.sh        # 阶段 0：一次性收集设备事实（只读）
 scripts/fetch-partitions.sh     # 阶段 1：fastboot fetch boot / vendor_boot
+scripts/extract-profile.sh     # 阶段 2：extractor → profile.conf + 内核分析报告
+scripts/build-native.sh        # 阶段 3：构建 native payload
+scripts/run-exploit.sh         # 阶段 3：CLI 路线在设备上跑利用并回收日志
 vendor/ghostlock-app/          # 上游主线（git submodule，pin 在 d2ab286e）
 docs/                          # 本项目过程记录：profile、验证日志、结论
-artifacts/                     # props 快照、boot.img 等大文件（不进 git）
+artifacts/                     # props 快照、boot.img、profile、日志（不进 git）
 ```
 
 ## 本机工具链（已确认可用）
