@@ -409,6 +409,78 @@ namespace ghostlock::attack {
             "  echo \"[*] kernelsu already loaded; restoring enforcing\" >>\"$LOG\"\n"
             "  echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
             "fi\n"
+            /* Titan 2 集成：把 ZygiskNext / Vector(LSPosed) 这条栈按**正确时序**拉起来。
+             * 放在这里是因为 root 脚本是利用成功后唯一天然拥有 uid 0 的执行点
+             * （app 自己不是 root；Shizuku 每次重启都要重起，不满足「一键」）。
+             *
+             * 时序（顺序错了会掉进 recovery，务必保持）：
+             *   1) 装模块（app 把 zip 放在 $HOME_DIR/modules）
+             *   2) late-load：把 modules_update 应用到 modules，并跑 stage
+             *   3) 起 ZygiskNext 守护进程 → 它把 Zygisk 注入点挂进 zygote
+             *   4) 等 zygote 真的挂上（zygote_states ≥ 1）
+             *   5) 只有挂上了才起 Vector daemon（它靠重启 system_server 注入服务）
+             * 少一步或顺序反了 → Vector daemon 注不进 → 反复重启 system_server →
+             * framework 起不来 → rescue party → recovery（recovery 里 adbd 关着）。
+             * 所以第 5 步必须带「挂不上就不起」的保护。
+             * 纯字符串改动，不触碰任何攻击代码。 */
+            /* 模块 zip 的位置：先看 native 的 runtime home（app 直接跑时就是
+             * app 的 filesDir），再看环境变量，最后在 /data/data 下按包名找
+             * files/modules（走 Shizuku 路径时 home 在 Shizuku 进程里，app 摆的
+             * 模块只能由 root 这样找回来）。 */
+            "MODZIP_DIR=\"\"\n"
+            "if [ -d \"$HOME_DIR/modules\" ]; then MODZIP_DIR=\"$HOME_DIR/modules\"; fi\n"
+            "if [ -z \"$MODZIP_DIR\" ] && [ -n \"$GHOSTLOCK_LSPD_MODULES\" ]; then\n"
+            "  if [ -d \"$GHOSTLOCK_LSPD_MODULES\" ]; then MODZIP_DIR=\"$GHOSTLOCK_LSPD_MODULES\"; fi\n"
+            "fi\n"
+            "if [ -z \"$MODZIP_DIR\" ]; then\n"
+            "  for d in /data/data/*/files/modules; do\n"
+            "    [ -d \"$d\" ] || continue\n"
+            "    if ls \"$d\"/*.zip >/dev/null 2>&1; then MODZIP_DIR=\"$d\"; break; fi\n"
+            "  done\n"
+            "fi\n"
+            "echo \"[*] modules dir=$MODZIP_DIR\" >>\"$LOG\"\n"
+            "if [ -n \"$MODZIP_DIR\" ] && [ -d \"$MODZIP_DIR\" ]; then\n"
+            "  for z in \"$MODZIP_DIR\"/*.zip; do\n"
+            "    [ -f \"$z\" ] || continue\n"
+            "    echo \"[*] installing module $z\" >>\"$LOG\"\n"
+            "    \"$KSUD\" module install \"$z\" >>\"$LOG\" 2>&1\n"
+            "    echo \"[*] module install exit=$?\" >>\"$LOG\"\n"
+            "  done\n"
+            "  echo \"[*] late-load (modules)\" >>\"$LOG\"\n"
+            "  \"$KSUD\" late-load --kmi \"$KMI\" --allow-shell >>\"$LOG\" 2>&1\n"
+            "  echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
+            "  echo \"[*] starting zygisk daemon (post-fs-data)\" >>\"$LOG\"\n"
+            "  \"$KSUD\" post-fs-data >>\"$LOG\" 2>&1 &\n"
+            "  sleep 8\n"
+            "  ZNCTL=/data/adb/ksu/bin/znctl\n"
+            "  ZGONE=0\n"
+            "  i=0\n"
+            "  while [ $i -lt 20 ]; do\n"
+            "    if [ -x \"$ZNCTL\" ] && \"$ZNCTL\" status 2>/dev/null | grep -q 'zygote_states:1'; then\n"
+            "      ZGONE=1\n"
+            "      break\n"
+            "    fi\n"
+            "    sleep 1\n"
+            "    i=$((i+1))\n"
+            "  done\n"
+            "  echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
+            "  if [ \"$ZGONE\" = \"1\" ]; then\n"
+            "    if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
+            "      echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
+            "      cd /data/adb/modules/zygisk_vector && ./daemon --system-server-max-retry=3 >>\"$LOG\" 2>&1 &\n"
+            "      sleep 8\n"
+            "    fi\n"
+            "  else\n"
+            "    echo '[!] zygote not patched; skipping Vector daemon to avoid the system_server restart loop' >>\"$LOG\"\n"
+            "  fi\n"
+            "  if [ -x /data/adb/modules/zygisk_vector/cli ]; then\n"
+            "    echo '== vector cli status ==' >>\"$LOG\"\n"
+            "    /data/adb/modules/zygisk_vector/cli status >>\"$LOG\" 2>&1\n"
+            "    echo '== zygisk next status ==' >>\"$LOG\"\n"
+            "    \"$ZNCTL\" status >>\"$LOG\" 2>&1\n"
+            "  fi\n"
+            "  echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
+            "fi\n"
             "else\n"
             "  echo '[!] fixup failed; SELinux left permissive' >>\"$LOG\"\n"
             "fi\n",

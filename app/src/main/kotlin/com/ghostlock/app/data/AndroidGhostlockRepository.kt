@@ -54,6 +54,12 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         /** The one-tap run path needs the separate Shizuku app. */
         const val ShizukuPackage = "moe.shizuku.privileged.api"
 
+        /* Zygisk / LSPosed module zips, shipped as assets: the device cannot
+         * reach the release hosts itself. The native root script installs them
+         * right after the late-load, in the order that keeps the framework up. */
+        const val LspdStackAssetDir = "modules"
+        const val LspdStackDirectory = "modules"
+
         /* U01-S14: per-run KernelSU log name; the resolved path travels to
          * the native process via GHOSTLOCK_KSU_LOG. */
         fun ksuLogName(runStamp: Long) = "ghostlock-ksu-$runStamp.log"
@@ -186,6 +192,34 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
      * Without a shell path the answer stays UNKNOWN and the native
      * pre-attack check decides.
      */
+    /**
+     * Stages the Zygisk / LSPosed module zips next to the native runtime home.
+     *
+     * The native root script (the only uid-0 step after the exploit) installs
+     * them and brings the framework up in the right order; the app itself is
+     * not root and cannot do that part.
+     */
+    private suspend fun stageLspdStackModules(onLog: (String) -> Unit) =
+        withContext(Dispatchers.IO) {
+            val target = File(filesDir, LspdStackDirectory)
+            if (!target.isDirectory && !target.mkdirs()) {
+                onLog("<k> warning: cannot create ${target.absolutePath}")
+                return@withContext
+            }
+            val names = appContext.assets.list(LspdStackAssetDir).orEmpty()
+            for (name in names) {
+                if (!name.endsWith(".zip")) continue
+                val out = File(target, name)
+                if (out.isFile && out.length() > 0) continue
+                runCatching {
+                    appContext.assets.open("$LspdStackAssetDir/$name").use { input ->
+                        out.outputStream().use { input.copyTo(it) }
+                    }
+                }.onFailure { onLog("<k> warning: cannot stage $name: ${it.message}") }
+                    .onSuccess { onLog("<k> staged module $name (${out.length()} bytes)") }
+            }
+        }
+
     /** True when the package is installed (Shizuku ships as its own app). */
     private fun isPackageInstalled(packageName: String): Boolean = runCatching {
         appContext.packageManager.getPackageInfo(packageName, 0)
@@ -614,6 +648,10 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             require(binary.isFile) { "missing native binary: ${binary.absolutePath}" }
             val ksud = resolveKsudPath(onLog)
             if (ksud != null) onLog("<k> ksud ready: ${ksud.absolutePath}") else onLog("<k> warning: ksud not found")
+            /* The Zygisk / LSPosed stack is installed by the native root script
+             * right after the late-load, so the zips have to be in place before
+             * the native starts. */
+            stageLspdStackModules(onLog)
             // U01-S14: a per-run KernelSU log path so a previous run's markers
             // can never satisfy the handoff probe; passed to the native process.
             val ksuLog = File(workDir, ksuLogName(System.currentTimeMillis()))
