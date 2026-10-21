@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, blockers, open-questions]
 created: "2026-10-21T03:35:43"
-updated: "2026-10-21T10:29:05"
+updated: "2026-10-21T15:06:25"
 ---
 
 <!-- compiled_truth -->
@@ -117,3 +117,9 @@ updated: "2026-10-21T10:29:05"
   summary: "B4 路线在本机不再阻塞：tcp_zerocopy 一次命中；LSPosed 栈也已点亮（Vector 2.2 / API 102 / Enabled Modules 1）"
   source: "真机验证"
   affects: [porting-blockers]
+
+- time: 2026-10-21T15:06:25
+  kind: evidence
+  summary: "B7（新增）：官方 Shizuku 13.6.0 在本机（MediaTek）上 UserService 起不来 —— 上游 issue RikkaApps/Shizuku#1198 的复现设备就是 Unihertz Titan 2 / Android 16 / Shizuku 13.6.0 / UID 2000。OEM 补丁让 makeApplicationInner() 解引用为 null 的 Application.getProcessName() → 辅助进程 NPE 崩溃，bindUserService 永不回调。app 侧已改：超时 3s→10s、超时不再 remove=true 杀进程、UserService 不可用时自动回退直连路径；Shizuku 侧换 thedjchi 分支"
+  source: "app 日志 + 上游 issue #1198"
+  affects: [porting-blockers, titan2-device]
