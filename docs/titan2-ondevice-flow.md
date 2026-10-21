@@ -34,54 +34,62 @@
 > 顺序很重要：**先**利用 + late-load（它负责把 ZygiskNext/Vector 跑起来），**后**用管理器装/启用模块。
 > 装了新模块后再点一次 GhostLock 的「执行」也可以（late-load 会重新 apply）。
 
-## Vector（LSPosed 框架）的激活方法 —— 实测结论
+## Vector（LSPosed 框架）的激活方法 —— **已验证可用（2026-10-21）**
 
-### 四个环节
+### 五个环节（顺序错一步就 recovery）
 
+```bash
+# ① KernelSU 进内存（利用的副产物）
+adb shell 'su -c "/data/adb/ksu/bin/ksud late-load --kmi android14-6.1 --allow-shell"'
+
+# ② 装两个模块（必须走 su 域：root 脚本在 shell 域写不了 /data/adb/modules_update，
+#    且要用已安装那份 ksud —— /data/adb/ksu/bin/ksud）
+adb shell 'su -c "rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu"'
+adb shell 'su -c "/data/adb/ksu/bin/ksud module install /data/local/tmp/modules/zygisknext.zip"'
+adb shell 'su -c "/data/adb/ksu/bin/ksud module install /data/local/tmp/modules/vector.zip"'
+
+# ③ 再 late-load 一次（把模块 apply 上）
+adb shell 'su -c "/data/adb/ksu/bin/ksud late-load --kmi android14-6.1 --allow-shell"'
+
+# ④ 起 ZygiskNext 守护进程（它把注入点挂进 zygote）
+adb shell 'su -c "nohup /data/adb/ksu/bin/ksud post-fs-data >/data/local/tmp/pfsd.log 2>&1 &"'
+#    等 zygote 真的挂上：znctl status → zygote_states:1（出现 zn-nsdaemon-zygote 进程）
+
+# ⑤ 等 60 秒让注入稳定，再起 Vector daemon（它会重启一次 system_server）
+sleep 60
+adb shell 'su -c "cd /data/adb/modules/zygisk_vector && (./daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &)"'
 ```
-① KernelSU 进内存
-   su -c 'ksud late-load --kmi android14-6.1 --allow-shell'
-   → /proc/modules 出现 kernelsu
 
-② ZygiskNext 守护进程起来
-   su -c 'rm -f /data/adb/zygisksu/znctx; cd /data/adb/modules/zygisksu && (./bin/zygiskd daemon &)'
-   验证：znctl status → modules64:1,zygisk_vector
+### 验证
 
-③ zygote 带上注入点
-   正常情况：守护进程起来后它自己处理（zygote_states 会变成 1）
-   必要时：重启 zygote（两个都要杀！只杀 zygote64 本机直接进 recovery）
-   验证：znctl status → zygote_states ≥ 1
-
-④ Vector daemon 起来（它靠重启 system_server 把 VectorService 注进去）
-   su -c 'cd /data/adb/modules/zygisk_vector && (./daemon --system-server-max-retry=3 &)'
-   验证：/data/adb/modules/zygisk_vector/cli status → Framework Version: 2.2 / API Version: 102
+```bash
+adb shell 'su -c "/data/adb/modules/zygisk_vector/cli status"'
+#   Framework Version: 2.2
+#   Version Code: 3080
+#   API Version: 102
+#   Enabled Modules: 1
 ```
 
-### 顺序反了就是 recovery
+### 关键经验（都踩过）
 
-④ 必须在 ③ 成功之后：否则 daemon 注不进去 → 反复重启 system_server → framework 起不来 →
-rescue party → **recovery**（recovery 里 adbd 关着，adb/fastboot 全够不着，只能长按电源键）。
-
-### 实测记录（2026-10-21，3 次尝试）
-
-| 尝试 | ② | ③ | ④ | 结果 |
-| --- | --- | --- | --- | --- |
-| 14:20 | ✅ | ✅（zygote 当时是刚 boot 出来的） | ✅ | **成功**：framework 活着，`cli status` 正常，探针模块被识别（`Loading legacy module ...`） |
-| 16:33 | ✅ | ⚠️ 手工只杀 zygote64 | — | framework 没起来 → recovery |
-| 17:2x | ✅（`zygote_states: 1`） | ✅（守护进程自己挂上的） | ✅ | `cli status` 正常（Framework 2.2 / API 102），**但随后 framework 没起来** → 又一次 recovery |
-
-**结论**：Vector 本身能在本机激活（成功那次是真的活了，模块被框架识别），
-但 **④ 的 system_server 重启在本机很不稳**：3 次里 2 次把 framework 弄挂。
-怀疑与「被注入的是不是刚 boot 出来的 zygote」有关（成功那次 zygote 是新的）。
-
-→ 实践建议：**要稳定用 LSPosed 栈，应该在一次干净重启后立刻按 ①②③④ 走**，
-   让守护进程赶在 zygote 之前就位；或者干脆接受「Vector 激活 = 一次框架重启」的代价。
+1. **⑤ 之前必须等 60 秒**。不等就会 framework 起来一半挂掉 → 手机重启/进 recovery
+   （我们 3 次里 2 次栽在这）。等够之后一次就成。
+2. **② 必须先删旧模块目录**：`ksud module install` 覆盖已有模块时报
+   `i/o error: No such file or directory`（看着像 bug，其实是旧目录残留）。
+3. **② 必须经 su + 用 /data/adb/ksu/bin/ksud**：root 脚本本身在 shell 域（uid 0 但域没变），
+   写不了 /data/adb/modules_update（Permission denied）；ksu 域也执行不了 app 目录里的 libksud.so。
+4. **不要改 Vector 自带的 service.sh** 去掉 `unshare` 那行 —— 改了就变成开机自启，
+   daemon 在 zygote 没注入时反复重启 system_server → 直接进 recovery。
+5. **别只杀 zygote64**：本机两个 zygote（zygote64 + webview_zygote），只杀一个会让
+   framework 起不来 → recovery。要重启 zygote 就两个一起杀。
+6. `znctl status` 里 `zygote_states:0` 但进程里已有 `zn-nsdaemon-zygote` 时，说明
+   注入正在做；**等它稳定再动 Vector daemon**。
 
 ### 与「一键 root app」的关系
 
-app 只负责 root（利用 + late-load），**不碰 LSPosed 栈**：
-Vector 的激活属于独立模块管理器（Vector / LSPosed）那条线的事。
-如果只要临时 root，**不要**起 ④ —— 那一步是本机最不稳的动作。
+app 只负责 root（利用 + late-load）；**装模块框架这一段已经并进 native 的 root 脚本**
+（`src/core/attack/ops.cpp` 的 Titan 2 集成段），时序固化在上面这五步里，
+app 只需要把两个模块 zip 摆到 runtime home 的 `modules/` 目录。
 
 ## 验证
 
