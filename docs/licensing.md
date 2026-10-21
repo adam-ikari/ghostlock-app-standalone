@@ -43,3 +43,38 @@ ZygiskNext 的仓库未声明 SPDX id，以其仓库 LICENSE 为准）。
 
 1. 新版 libxposed 元数据必须在 APK **根目录** `META-INF/xposed/`（放 `assets/` 框架认不出来）。
 2. keystore 要固定（`apps/xposed-probe/probe.keystore`，不进 build/），否则重建后签名变化 → 覆盖安装失败。
+
+## ⚠️ 子模块历史里还留着内置过的那两个 GPL 包
+
+子模块分支 `feat/titan2-profile` 的**第 4 个提交**（`feat(app): 一键装模块框架…`）曾把
+`vector.zip` / `zygisknext.zip` 直接放进 `app/src/main/assets/modules/`（16MB），
+虽然**最后一个提交**已经把它们删掉（最终树是干净的 ✓），但**历史里仍然带着 GPL-3.0 的二进制**。
+
+→ **往上游推之前建议重写这段历史**（把那两个 blob 从提交里剔除），否则 fork 的历史里
+仍算「分发」GPL 包：
+
+```bash
+cd vendor/ghostlock-app
+# 例：用 git filter-repo 剔除 assets/modules 下的 zip（会改写 04 号提交及其后继）
+git filter-repo --path app/src/main/assets/modules --invert-paths
+git log --oneline -6
+```
+
+或者：只把最终状态做成 patch 推（`git format-patch` 的最后一两个提交不含 zip ✓，
+但那样会丢掉中间的实验过程 ✗）。
+
+## 推送清单
+
+两个仓库**都没有可推的远端**：
+
+- 项目仓库 `titan2_temp_root`：`git remote -v` 为空 ✗（本地 init 的）
+- 子模块 `vendor/ghostlock-app`：唯一远端是上游 `https://github.com/YuKongA/ghostlock-app` ✗
+  （我们是 fork 关系，不能直接 push；需要一个自己的 fork 作为 `origin`）
+
+已备好的推送物料（`artifacts/patches/`，**不入 git**，大文件别提交）：
+
+| 文件 | 用途 |
+| --- | --- |
+| `ghostlock-app-titan2.bundle` | 子模块分支的完整历史（`git clone` 后 `git pull` 即可恢复） |
+| `titan2_temp_root.bundle` | 项目仓库 master 的完整历史 |
+| `0001..0006-*.patch` | 子模块 6 个提交的 patch（可直接 `git am` 到上游 main 上提 PR ⚠️ 含 20MB 的 zip 提交，见上） |
