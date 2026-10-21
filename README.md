@@ -49,12 +49,12 @@ GhostLock *kernel profile*。
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| 0 | 取设备事实：`uname -r` / SoC / bootloader 锁定状态 / SELinux / kallsyms 可见性 | ⏳ 待设备接入（SoC/内核已由固件离线坐实） |
-| 1 | 取 `boot.img` + `vendor_boot.img`（`fastboot fetch`，只读不解锁） | ✅ 已用官方固件包离线取到（免设备） |
+| 0 | 取设备事实：`uname -r` / SoC / bootloader 锁定状态 / SELinux / kallsyms 可见性 | ✅ 真机已采（Android 16 / Titan 2_V01.00.14 / MT6878） |
+| 1 | 取 `boot.img` + `vendor_boot.img`（`fastboot fetch`，只读不解锁） | ✅ 官方固件包离线取到（免设备） |
 | 2 | 用 Rust extractor 生成 profile 骨架，校验字段完整性 | ✅ 两份候选 release 都已生成并补齐 |
-| 3 | 补齐物理地址与结构体布局，真机跑通利用 | ⏳ 物理地址已补齐；待真机跑通 |
-| 4 | root 后加载 KernelSU（`ksud` late-load）→ ZygiskNext → LSPosed | ⏳ |
-| 5 | 固化：profile 落到 `vendor/ghostlock-app` 并登记 `index.conf`，写复现文档 | 🟡 profile 与文档已就位，待真机验证后再定「已支持」 |
+| 3 | 补齐物理地址与结构体布局，真机跑通利用 | ✅ **真机一次跑通**（tcp_zerocopy，uid 0） |
+| 4 | root 后加载 KernelSU（`ksud` late-load）→ ZygiskNext → LSPosed | ✅ **KernelSU 内存 late-load + ZygiskNext + Vector(LSPosed 2.2) 全部跑起来** |
+| 5 | 固化：profile 落到 `vendor/ghostlock-app` 并登记 `index.conf`，写复现文档 | ✅ 已做；「已支持」标记等装一个真实模块后再定 |
 
 关键风险点（按可能性排序）：
 
@@ -63,9 +63,10 @@ GhostLock *kernel profile*。
 3. ~~**内核没有 BTF**~~ → 已排除：镜像里带 BTF，结构体布局同时有 6.1 家族宏兜底，且与上游已验证
    6.1 profile 逐字段一致。
 4. ~~**MTK 物理地址推导不出**~~ → 已排除：`vendor_boot.img` 头给内核加载地址、其内 DT 给 DRAM 基址，
-   都是 `0x40000000`。
-5. **真机稳定性** → 利用依赖竞态，MTK 小核/大核调度差异可能让成功率偏低，需要调 `execution` 参数。
-6. **设备固件版本未知** → `uname -r` 到底是 6.1.115 还是 6.1.145，要等设备接入确认（两份 profile 都备好了）。
+   都是 `0x40000000`（真机 `/proc/iomem` 复核一致）。
+5. ~~**真机稳定性**~~ → 已排除（第一次运行即成功，`clean=1/1`）。
+6. **设备固件版本未知** → 已排除：真机 `uname -r` = `6.1.145-android14-11-gbd17012cc2f7-ab14044926`。
+7. **生命周期** → 临时 root 与 late-load 的 KernelSU 都只在本次开机有效，重启即失效（项目非目标）。
 
 ## 目录
 

@@ -5,44 +5,55 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-21T03:35:34"
+updated: "2026-10-21T06:28:27"
 ---
 
 <!-- compiled_truth -->
-## 链路
+## 链路（在 Titan 2 上已逐步验证）
 
 ```mermaid
 graph LR
-    A["GhostLock 利用<br/>uid 0（内存态）"] --> B["KernelSU<br/>ksud late-load"]
-    B --> C["ZygiskNext 模块<br/>（KernelSU 不自带 Zygisk）"]
-    C --> D["LSPosed / ReLSPosed 模块<br/>写入 /data/adb/modules"]
-    D --> E["Zygisk 注入 app_process<br/>LSPosed 管理器可用"]
-    E --> F["目标 app 被 hook"]
+    A["GhostLock 利用<br/>uid 0（内存态）"] --> B["KernelSU late-load<br/>ksud late-load --kmi android14-6.1 --allow-shell"]
+    B --> C["ZygiskNext 1.5.2<br/>（KernelSU 模块 zygisksu）"]
+    C --> D["Vector v2.2（LSPosed 继任者）<br/>（KernelSU 模块 zygisk_vector）"]
+    D --> E["LSPosed 模块可装可 hook"]
 ```
 
-## 各环节的硬要求
+## 已在真机跑通的步骤（2026-10-21）
 
-| 环节 | 要求 | 备注 |
+| 环节 | 命令 / 做法 | 结果 |
 | --- | --- | --- |
-| 利用 | uid 0，且要能写 `/data/adb` | ghostlock-app 提权后由 frontend 把 root 交给子进程 |
-| KernelSU | 设备上装有带 `libksud.so` 的 root 管理器（KernelSU / ReSukiSU / BakaSU / KowSU） | app 会自动探测；没有 `ksud` 也能拿到 uid 0，但**装不了模块** |
-| KernelSU 加载方式 | **late-load**（内存中加载，不改 boot） | 正好匹配「临时 root」语义：重启即失效 |
-| Zygisk | KernelSU 不自带 Zygisk，需要 **ZygiskNext** 模块 | LSPosed 系依赖 Zygisk |
-| LSPosed | 官方 LSPosed 已停更；用维护中的 **ReLSPosed / JingMatrix LSPosed** 系（需 Zygisk） | Android 15 需新版 |
-| 生效范围 | 只在**本次开机窗口** | 重启后 root 与所有内存态模块都没了 |
+| 利用 | `adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/profile.bin` | `[+] child is root!`（uid 0） |
+| SELinux 修复 | root 脚本 `load_policy` + fixup | `policy fixup rc=0`，恢复 enforcing |
+| KernelSU | 装官方 KernelSU v3.3.1 管理器（`me.weishu.kernelsu`），再跑一次利用 | `ksud late-load --kmi android14-6.1 --allow-shell` → `late-load exit=0`，`/proc/modules` 出现 `kernelsu` |
+| shell 即 root | `su -c id` | `uid=0(root) context=u:r:ksu:s0` |
+| ZygiskNext | `ksud module install zygisknext.zip` → `ksud post-fs-data` | `zn-daemon` 起来；`znctl status` 显示 `root_status: ✅KernelSU`、`inject_state: 1` |
+| Vector/LSPosed | `ksud module install vector.zip` + 装 `manager.apk` → 重启 zygiskd 让它重扫模块 | `znctl status` → `modules64:1,zygisk_vector`；`cli status` → `Framework Version: 2.2 / API Version: 102` |
+| 模块管理 | `cli modules ls/enable/disable`、`cli scope add/ls/rm/set` | 可用（`Enabled Modules: 0` = 还没装模块） |
 
-## 为什么这条链子成立
+## 关键经验（下次直接照抄）
 
-临时 root 的「临时」只影响**生命周期**，不影响**能力**：只要在本次开机里拿到 uid 0，
-就能把 KernelSU、ZygiskNext、LSPosed 全部以内存/模块目录方式装进去并立刻使用。
-代价是每次开机都要重跑一遍利用（利用本身很快，profile 固定后是几分钟内的事）。
+1. **late-load 的 KMI 要对上**：本机 `uname -r` = `6.1.145-android14-11-…` → KMI = `android14-6.1`；
+   KernelSU release 里要有 `lkm-aarch64-android14-6.1_kernelsu.ko`（官方 v3.3.1 有）。
+2. **模块是「pending」的**：`ksud module install` 先落到 `/data/adb/modules_update/<id>`，
+   要再跑一次 `ksud late-load` 才会搬进 `/data/adb/modules/` 并执行 stage 脚本。
+3. **zygiskd 必须在模块装好之后重启**，否则它扫不到新模块（`Modules: 0`）：
+   `znctl stop` → 重新跑 `ksud post-fs-data` → `znctl dump-zn` 就能看到 `modules64:1,...`。
+4. **zygote 要重起一次**才能吃到注入：`ksud soft-reboot` 或杀 zygote 让 init 重拉。
+5. **Vector 的 daemon 别用 `unshare --propagation`**：设备上的 toybox `unshare` 不支持该参数，
+   直接 `cd /data/adb/modules/zygisk_vector && ./daemon &` 即可。
+6. **宿主（Windows）下载 GitHub release**：`github.com`/`objects.githubusercontent.com` 不通，
+   但 `api.github.com` 与 `release-assets.githubusercontent.com` 通 →
+   `https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>` + `Accept: application/octet-stream`。
+   并发写同一个文件会写坏，下载要串行。
+7. **宿主与本机之间传文件**：a2mcp 的 `/xfer/` 路由支持 **PUT 上传**，
+   `curl -H 'Authorization: Bearer <token>' -T <file> https://<tunnel>/xfer/<name>`。
 
 ## 失效边界
 
-- 利用必须每次开机重跑 → 自动化脚本有价值（`scripts/` 里预留）。
-- LSPosed 模块若在 `/data/adb/modules` 里被「固化」成开机加载，KernelSU 没了就加载不了；
-  late-load 场景下应理解为**本次窗口内的手动装载**。
-- 设备一旦重启 → 回到原点。这与「永久 root」不是一回事，README 的非目标里已写明。
+- 临时 root 与 late-load 的 KernelSU 都只在**本次开机**有效；重启后回到原点。
+- ZygiskNext / Vector 的模块文件在 `/data/adb/modules/` 里，但 KernelSU 没了就不会被加载。
+- 设备当前是**锁屏有密码**状态（`wm dismiss-keyguard` 无效），要动 manager UI 需要用户解锁。
 
 
 ## Timeline
@@ -57,4 +68,16 @@ graph LR
   kind: decision
   summary: "固化临时 root → LSPosed 的链路与失效边界"
   source: "上游 ghostlock-app 文档 + 生态常识"
+  affects: [temp-root-to-lsposed]
+
+- time: 2026-10-21T06:28:27
+  kind: decision
+  summary: "真机验证整条链路：临时 root → KernelSU late-load → ZygiskNext → Vector(LSPosed) 框架"
+  source: "宿主机真机（2026-10-21）"
+  affects: [temp-root-to-lsposed]
+
+- time: 2026-10-21T06:28:27
+  kind: evidence
+  summary: "真机跑通 临时root → KernelSU late-load → ZygiskNext → Vector(LSPosed 2.2) 框架，模块管理 CLI 可用"
+  source: "宿主机真机操作 + 逐段日志"
   affects: [temp-root-to-lsposed]

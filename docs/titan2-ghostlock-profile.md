@@ -228,21 +228,62 @@ adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/prof
 
 > 注意：late-load 的 KernelSU 只在内存里，**重启即失效**（本项目的非目标就是永久 root）。
 
-### 8.2 剩下的：Zygisk + Xposed 框架（进行中）
+### 8.2 Zygisk + Xposed 框架（已完成 ✅）
 
 链路：`ZygiskNext`（Zygisk 的独立实现，提供 Zygisk API）+
 `Vector v2.2`（LSPosed 的继任者，Android 15/16 用的就是它），
 都以 KernelSU 模块的形式装进 `/data/adb/modules`：
 
 ```sh
+# ZygiskNext
+adb push ZygiskNext.zip /data/local/tmp/zygisknext.zip
 su -c '/data/adb/ksu/bin/ksud module install /data/local/tmp/zygisknext.zip'
+
+# Vector（LSPosed 继任者）
+adb push Vector.zip /data/local/tmp/vector.zip
 su -c '/data/adb/ksu/bin/ksud module install /data/local/tmp/vector.zip'
-su -c '/data/adb/ksu/bin/ksud late-load --kmi android14-6.1 --allow-shell'   # 跑模块 stage
+adb install -r manager.apk          # org.matrix.vector.manager
 ```
 
-要点：Zygisk 的注入只发生在 **fork+exec** 的新进程上，late-load 场景下 zygote /
-system_server 早就在跑了，所以需要让它们重起一次（`ksud soft-reboot` 或模块自己
-respawn），注入才生效。
+踩过的坑（照抄即可）：
+
+1. `ksud module install` 只把模块放进 `/data/adb/modules_update/`，
+   **要再跑一次 `ksud late-load`（或 `ksud post-fs-data`）** 才会搬进 `/data/adb/modules/` 并跑 stage 脚本。
+2. **zygiskd 必须在模块装好之后重启**，否则它扫不到新模块：
+   `znctl stop` → 重跑 `ksud post-fs-data` → `znctl dump-zn` 才看得到 `modules64:1,zygisk_vector`。
+3. **zygote 要重起一次**才能吃到注入（`ksud soft-reboot`，或杀 zygote 让 init 重拉）。
+4. Vector 的 daemon 别用 `unshare --propagation`（设备上的 toybox `unshare` 没这个参数），
+   直接 `cd /data/adb/modules/zygisk_vector && ./daemon &`。
+
+验证结果：
+
+```
+$ su -c '/data/adb/ksu/bin/znctl status'
+version_local:1.5.2-864-a4a72ce-release
+uname:6.1.145-android14-11-gbd17012cc2f7-ab14044926 aarch64
+inject_state:1
+root_status:✅KernelSU (32680)
+modules64:1,zygisk_vector
+
+$ su -c '/data/adb/modules/zygisk_vector/cli status'
+Framework Version: 2.2
+Version Code: 3080
+API Version: 102
+Enabled Modules: 0
+Status Notification: true
+```
+
+即：**Xposed 框架已经活着**（`Enabled Modules: 0` 只是还没装模块）。
+模块管理有 CLI：`cli modules ls|enable|disable`、`cli scope add|ls|rm|set`。
+
+### 8.3 还差最后一步：装一个具体模块
+
+框架已经能管模块，剩下只是把**模块 APK** 装进去（Vector 的 manager 界面里选 APK 安装，
+或者把模块 APK 装上后由 manager 检测，再用 CLI `enable` + `scope add`）。
+本项目真正的用途是给 `hwkbd_ime` / `term-ime` / `titan_ir_remote` / `titan_dial` 做 hook，
+那部分属于后续工作（模块要自己写）。
+
+> 设备当前是**有密码的锁屏**状态（`wm dismiss-keyguard` 无效），要动 manager 界面需要用户先解锁。
 
 ## 9. 本机构建环境（真机阶段要用的）
 
