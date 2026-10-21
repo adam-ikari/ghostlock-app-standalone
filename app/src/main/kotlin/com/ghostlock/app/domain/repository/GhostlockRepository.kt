@@ -55,6 +55,16 @@ interface GhostlockRepository {
 
     suspend fun cacheDocument(uri: String, fileName: String): String
 
+    /**
+     * Copies a picked module zip into the runtime home's modules/ directory.
+     *
+     * The app never ships the Zygisk / LSPosed packages itself: both are
+     * GPL-3.0, and this app is Apache-2.0. The user picks the zips (from the
+     * official releases) and the native root script installs them.
+     */
+    suspend fun stageModuleZip(uri: String, name: String): String =
+        cacheDocument(uri, name)
+
     suspend fun publishOffsets(candidate: OffsetCandidate): String
 
     /** Verbatim user-imported documents, newest first. */

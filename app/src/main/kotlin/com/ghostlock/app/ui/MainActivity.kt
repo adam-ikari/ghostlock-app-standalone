@@ -188,6 +188,7 @@ private fun GhostlockRoute(
 
             override fun onShizukuChanged(enabled: Boolean) = viewModel.toggleShizuku(enabled)
             override fun onOpenManagerPicker() = viewModel.onOpenManagerPicker()
+            override fun onPickModuleZip() = viewModel.onPickModuleZip()
             override fun onCloseManagerPicker() = viewModel.onCloseManagerPicker()
             override fun onManagerSelected(pkg: String?) = viewModel.onManagerSelected(pkg)
             override fun onDialogItemSelected(index: Int) = viewModel.onDialogItemSelected(index)

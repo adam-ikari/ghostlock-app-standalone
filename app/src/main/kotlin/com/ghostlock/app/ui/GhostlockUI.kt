@@ -201,6 +201,8 @@ interface GhostlockActions {
     fun onSafeModeChanged(enabled: Boolean)
     fun onForceAttackTestChanged(enabled: Boolean)
     fun onShizukuChanged(enabled: Boolean)
+    fun onPickModuleZip()
+
     fun onOpenManagerPicker()
     fun onCloseManagerPicker()
     fun onManagerSelected(pkg: String?)
@@ -882,6 +884,11 @@ private fun ControlPanel(
                     onSelectedIndexChange = actions::onCpuPairSelected,
                 )
             }
+            ArrowPreference(
+                title = stringResource(R.string.module_zips_label),
+                summary = stringResource(R.string.module_zips_summary),
+                onClick = actions::onPickModuleZip,
+            )
             SwitchPreference(
                 checked = state.safeModeEnabled,
                 onCheckedChange = actions::onSafeModeChanged,

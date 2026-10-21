@@ -757,6 +757,12 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     override suspend fun readDocument(uri: String): String =
         appContext.contentResolver.openInputStream(uri.toUri())?.bufferedReader()?.use { it.readText() } ?: throw IOException("cannot open $uri")
 
+    override suspend fun stageModuleZip(uri: String, name: String): String {
+        val dir = File(filesDir, LspdStackDirectory)
+        if (!dir.isDirectory) dir.mkdirs()
+        return cacheDocument(uri, "$LspdStackDirectory/$name")
+    }
+
     override suspend fun cacheDocument(uri: String, fileName: String): String {
         val target = File(filesDir, fileName)
         appContext.contentResolver.openInputStream(uri.toUri())?.use { input ->

@@ -90,6 +90,8 @@
     <string name="kernel_profile_invalid_summary">Correct the marked fields</string>
     <string name="cpu_pair_custom">Custom (%1$s)</string>
     <string name="cpu_pair_label">CPU cores</string>
+    <string name="module_zips_label">LSPosed module packages</string>
+    <string name="module_zips_summary">Pick the official ZygiskNext / Vector zips to install; they are not bundled (GPL-3.0)</string>
     <string name="safe_mode_label">Safe mode</string>
     <string name="safe_mode_summary">Disable all modules</string>
     <string name="force_attack_test_label">Force attack test</string>

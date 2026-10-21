@@ -57,7 +57,10 @@ internal object RunCheckIds {
     const val ALREADY_ROOTED = "already_rooted"
 }
 
-enum class DocumentRequest { ImportOffsetsHocon, ImportOffsetsJson, BootImage, XblImage, PayloadImage, UefiImage, VendorBootImage }
+enum class DocumentRequest {
+    ImportOffsetsHocon, ImportOffsetsJson, BootImage, XblImage, PayloadImage, UefiImage, VendorBootImage,
+    ModuleZip,
+}
 
 /** Options offered by [promptBootAttach], in display order. VENDOR_BOOT is
  * only ever added to that list for MediaTek devices */
@@ -880,6 +883,13 @@ class GhostlockViewModel(
     fun onRun() = runExploit()
 
     /**
+     * Picks a Zygisk / LSPosed module zip (official releases) to install.
+     *
+     * The app ships neither: both are GPL-3.0 while this app is Apache-2.0.
+     */
+    fun onPickModuleZip() = send(GhostlockEffect.PickDocument(DocumentRequest.ModuleZip))
+
+    /**
      * The native pre-attack check skips the exploit when a KernelSU module is
      * already loaded; that line is the only reliable "already rooted" signal
      * the app can see without a shell, so it is folded into the checks.
@@ -1034,6 +1044,7 @@ class GhostlockViewModel(
             DocumentRequest.UefiImage -> stageUefi(uri)
             DocumentRequest.VendorBootImage -> stageVendorBoot(uri)
             DocumentRequest.PayloadImage -> stagePayload(uri)
+            DocumentRequest.ModuleZip -> stageModuleZip(uri)
             DocumentRequest.ImportOffsetsHocon, DocumentRequest.ImportOffsetsJson -> Unit
         }
     }
@@ -1044,6 +1055,7 @@ class GhostlockViewModel(
             DocumentRequest.ImportOffsetsHocon, DocumentRequest.ImportOffsetsJson ->
                 importDocuments(uris)
 
+            DocumentRequest.ModuleZip -> uris.firstOrNull()?.let(::stageModuleZip)
             DocumentRequest.BootImage -> uris.firstOrNull()?.let(::stageBoot)
             DocumentRequest.XblImage -> uris.firstOrNull()?.let(::stageXbl)
             DocumentRequest.UefiImage -> uris.firstOrNull()?.let(::stageUefi)
@@ -1388,6 +1400,21 @@ class GhostlockViewModel(
                 appendLog("parse error: ${error.message}")
                 appendLog("result: parse failed")
                 showNotice(R.string.parse_result_title, R.string.parse_failed)
+            }
+        }
+    }
+
+    /** Copies a picked module zip into the runtime home's modules/ directory. */
+    private fun stageModuleZip(uri: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val name = uri.substringAfterLast('/').ifBlank { "module.zip" }
+                val path = repository.stageModuleZip(uri, name)
+                appendLog("module zip staged: $path")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                appendLog("module zip failed: ${error.message}")
             }
         }
     }
