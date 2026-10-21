@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-21T10:29:05"
+updated: "2026-10-21T11:01:43"
 ---
 
 <!-- compiled_truth -->
@@ -92,4 +92,10 @@ graph LR
   kind: evidence
   summary: "Vector(LSPosed 2.2/API 102) 在 Titan 2 上激活成功；关键：起 Vector daemon 前必须等 zygote 注入稳定 60 秒，否则 framework 挂掉→recovery"
   source: "真机五步流程（late-load → su 域装模块 → late-load → zygiskd → 等 60s → Vector daemon）"
+  affects: [temp-root-to-lsposed]
+
+- time: 2026-10-21T11:01:43
+  kind: note
+  summary: "未解决：模块 hook 生效、cli status 正常，但 Vector 管理器首页仍显示「异常」(Mismatched)；已排除 daemon 挂/未注入/模块未加载/纯网络/管理器代次不一致（重装后仍异常），判断为管理器状态判定/状态通知通道的 cosmetic 问题"
+  source: "真机 18:47 复查"
   affects: [temp-root-to-lsposed]

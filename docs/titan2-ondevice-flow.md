@@ -154,3 +154,38 @@ hook fired at 1792579371193
 
 > 另外：管理器首页还会刷 `store/update: ... unavailable` —— 那是**网络**问题
 > （本机解析不了 backup.modules.lsposed.org / github），与框架注入无关。
+
+## 8.3 【未解决】管理器仍显示「Vector 异常」，但框架功能是好的
+
+**现象（2026-10-21 18:47 之后仍然存在）**：
+
+| 维度 | 状态 |
+| --- | --- |
+| 探针模块 hook | ✅ 真的触发了（`hook_marker` 有时间戳） |
+| `cli status` | ✅ `Framework 2.2 / API 102 / Enabled Modules: 1` |
+| `cli modules ls` | ✅ 探针模块 `enabled` |
+| system_server 注入 | ✅ 日志 `Injected Vector framework into system_server` |
+| **管理器首页** | ❌ 仍显示 **「Vector 异常」**（= 状态枚举里的 `Mismatched`） |
+
+**已排除的原因**：
+
+- daemon 挂了 → 排除（`cli status` 有应答 ✓）
+- 框架没注进 system_server → 排除（日志有注入成功 ✓）
+- 模块没被加载 → 排除（模块列表 + hook 触发 ✓）
+- 只是网络问题 → 排除（`store/update unavailable` 只影响商店/更新那两行 ✗ 不影响状态判定）
+- 管理器 APK 与框架代次不一致 → 已用模块自带那份重装过（`adb exec-out su -c 'cat .../manager.apk'`），
+  重装后日志里不再出现 `ipc: daemon transaction failed` ✓，**但界面仍显示异常** ✗
+
+**当前判断**：管理器的框架状态判定与实际不一致（Mismatched 是「能连上但事务失败」的兜底态），
+怀疑是**状态缓存 / 状态通知通道**这条路径的问题（`framework: setting the status notification to true failed`
+那行在 18:37 出现过），而不是注入本身。**功能不受影响**（模块照常生效），
+管理器 UI 的状态显示是 cosmetic 问题，后续再调。
+
+**复现/观察命令**：
+
+```bash
+adb shell 'su -c "/data/adb/modules/zygisk_vector/cli status"'
+adb shell 'su -c "/data/adb/modules/zygisk_vector/cli modules ls"'
+adb shell 'su -c "grep -iE \"VectorManager|ipc:|injected\" /data/adb/lspd/log/verbose_*.log | tail -20"'
+adb shell 'su -c "cat /data/data/<module>/files/hook_marker"'
+```
