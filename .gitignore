@@ -1,0 +1,6 @@
+artifacts/
+*.img
+*.apk
+local.properties
+.gradle/
+build/

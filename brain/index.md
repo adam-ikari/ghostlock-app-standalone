@@ -1,0 +1,9 @@
+# Brain Index
+
+_Auto-generated. Last updated 2026-10-21T03:35:55.309Z._
+
+- [ghostlock-cve-2026-43499](pages/ghostlock-cve-2026-43499.md) — category: concept | tags: [ghostlock, exploit, android] | ## 漏洞本体
+- [ghostlock-profile-workflow](pages/ghostlock-profile-workflow.md) — category: reference | tags: [ghostlock, profile, mediatek, workflow] | ## 官方流程（上游 `docs/kernel_profiles/README.md`）
+- [porting-blockers](pages/porting-blockers.md) — category: project | tags: [titan2, ghostlock, blockers, open-questions] | ## 阻塞点（按「一旦发生则整条路线作废」的严重度排序）
+- [temp-root-to-lsposed](pages/temp-root-to-lsposed.md) — category: concept | tags: [lsposed, kernelsu, zygisk, temp-root] | ## 链路
+- [titan2-device](pages/titan2-device.md) — category: project | tags: [titan2, device, mediatek] | ## 已知（证据较强）
