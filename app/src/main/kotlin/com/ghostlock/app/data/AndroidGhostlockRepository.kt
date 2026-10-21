@@ -51,6 +51,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val PrefDebugKernelLogEnabled = "debug_kernel_log_enabled"
         const val PrefDebugProfileOverrides = "debug_profile_overrides"
 
+        /** The one-tap run path needs the separate Shizuku app. */
+        const val ShizukuPackage = "moe.shizuku.privileged.api"
+
         /* U01-S14: per-run KernelSU log name; the resolved path travels to
          * the native process via GHOSTLOCK_KSU_LOG. */
         fun ksuLogName(runStamp: Long) = "ghostlock-ksu-$runStamp.log"
@@ -170,8 +173,15 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             shizukuEnabled = shizukuActive,
             shizukuStatus = if (shizukuActive) shizukuRunner.status()
             else com.ghostlock.app.domain.model.ShizukuStatus.NOT_REQUIRED,
+            shizukuInstalled = isPackageInstalled(ShizukuPackage),
         )
     }
+
+    /** True when the package is installed (Shizuku ships as its own app). */
+    private fun isPackageInstalled(packageName: String): Boolean = runCatching {
+        appContext.packageManager.getPackageInfo(packageName, 0)
+        true
+    }.getOrDefault(false)
 
     override fun selectCpuPair(index: Int) {
         if (index !in cpuPairs.indices) return

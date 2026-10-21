@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name">GhostLock</string>
+    <string name="app_name">GhostLock Titan 2</string>
     <string name="action_run">Run</string>
     <string name="action_running">Running…</string>
     <string name="advanced_settings">Advanced options</string>
@@ -55,6 +55,17 @@
     <string name="cancel">Cancel</string>
     <string name="profile_invalid">Profile parameters are invalid; fix the red fields first</string>
     <string name="run_blocked_no_profile">No profile matches this kernel; import or adjust it in Parameters</string>
+    <string name="run_checks_title">Pre-flight checks</string>
+    <string name="run_checks_summary">Everything the one-tap run needs: the kernel, the profile, and the separate apps it relies on.</string>
+    <string name="run_checks_blocked">%1$d blocking check(s) not satisfied — the run is disabled.</string>
+    <string name="check_state_ok">OK</string>
+    <string name="check_state_blocked">Required — the run cannot start yet</string>
+    <string name="check_state_optional">Optional — the run still works, without module loading</string>
+    <string name="check_kernel">Kernel supported</string>
+    <string name="check_profile">Profile matched and valid</string>
+    <string name="check_shizuku_app">Shizuku installed (separate app)</string>
+    <string name="check_shizuku_ready">Shizuku running and authorized</string>
+    <string name="check_kernelsu_manager">KernelSU manager installed (supplies ksud)</string>
     <string name="run_blocked_shizuku">Shizuku is not ready; tap the status card to start or authorize</string>
     <string name="export_share">Share offsets</string>
     <string name="export_failed">Export failed</string>

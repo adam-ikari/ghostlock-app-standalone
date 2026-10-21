@@ -20,9 +20,25 @@ data class KernelSnapshot(
     /** User-selected Shizuku path for kernels that do not require it. */
     val shizukuEnabled: Boolean = false,
     val shizukuStatus: ShizukuStatus,
+    /** The separate Shizuku app is installed (the one-tap path needs it). */
+    val shizukuInstalled: Boolean = false,
 )
 
 enum class ShizukuStatus { NOT_REQUIRED, NOT_RUNNING, PERMISSION_REQUIRED, READY }
+
+/**
+ * One pre-flight requirement of the one-tap run.
+ *
+ * [blocking] marks a check that must pass before the exploit may run; the
+ * others are advisories (a missing KernelSU manager still yields uid 0, it
+ * just cannot load modules afterwards).
+ */
+data class RunCheck(
+    val id: String,
+    val ok: Boolean,
+    val blocking: Boolean = false,
+    val detail: String = "",
+)
 
 enum class LogTone { Default, Error, Success, Warning, Progress, Kotlin, Shizuku }
 

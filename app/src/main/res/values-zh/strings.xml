@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name">GhostLock</string>
+    <string name="app_name">GhostLock Titan 2 版</string>
     <string name="action_run">执行</string>
     <string name="action_running">执行中…</string>
     <string name="advanced_settings">高级选项</string>
@@ -55,6 +55,17 @@
     <string name="cancel">取消</string>
     <string name="profile_invalid">配置参数不合法，请先修正红色标记的项</string>
     <string name="run_blocked_no_profile">未找到匹配本机内核的配置，请前往配置参数导入或调整</string>
+    <string name="run_checks_title">运行前检查</string>
+    <string name="run_checks_summary">一键临时 root 需要的东西：内核、profile，以及它依赖的独立 app。</string>
+    <string name="run_checks_blocked">有 %1$d 项必须条件未满足，暂时不能执行。</string>
+    <string name="check_state_ok">满足</string>
+    <string name="check_state_blocked">必须满足，否则无法开始执行</string>
+    <string name="check_state_optional">可选：不满足也能拿 root，只是没法加载模块</string>
+    <string name="check_kernel">内核受支持</string>
+    <string name="check_profile">profile 已匹配且字段合法</string>
+    <string name="check_shizuku_app">已安装 Shizuku（独立 app）</string>
+    <string name="check_shizuku_ready">Shizuku 正在运行且已授权</string>
+    <string name="check_kernelsu_manager">已安装 KernelSU 管理器（提供 ksud）</string>
     <string name="run_blocked_shizuku">Shizuku 未就绪，请点击状态卡启动或授权</string>
     <string name="export_share">分享偏移</string>
     <string name="export_failed">导出失败</string>

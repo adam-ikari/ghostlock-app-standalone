@@ -46,6 +46,7 @@ bypass there as well, so it saves time even where it isn't required.
 | `6.1.138-android14-11-g51f8c580613d-ab13911623`        | Redmi Note 14 Pro 5G / POCO X7                                   |
 | `6.1.145-android14-11-g74d1702dab4d-ab14669069`        | vivo T4, IQOO 12                                                 |
 | `6.1.145-android14-11-geaa643a2c0ee-ab14763719`        | Motorola Razr 50 Ultra / Motorola Razr+ 2024                     |
+| `6.1.145-android14-11-gbd17012cc2f7-ab14044926`        | Unihertz Titan 2                                                 |
 | `6.1.145-android14-11-g9b69cc399ae1-ab14819715`        | Motorola Edge 60 Fusion                                          |
 | `6.1.157-android14-11-ga8b0b542991e-ab15601211`        | Infinix GT 30 Pro (X6873)                                        |
 | `6.1.157-android14-11-gbd23337e42e7-ab14791245`        | Google Pixel 9a (Tensor G4), Google Pixel 7 (Tensor G2)          |

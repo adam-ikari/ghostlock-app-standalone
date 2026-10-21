@@ -177,6 +177,8 @@ data class GhostlockUiState(
     val managerCandidates: List<ManagerScanner.Candidate> = emptyList(),
     val selectedManagerPackage: String? = null,
     val managerPickerVisible: Boolean = false,
+    /** Pre-flight requirements of the one-tap run. */
+    val runChecks: List<com.ghostlock.app.domain.model.RunCheck> = emptyList(),
 )
 
 enum class DialogType { NONE, LIST, INPUT, CONFIRM, NOTICE }
@@ -838,6 +840,12 @@ private fun ControlPanel(
             onShizukuClick = actions::onStatusClick,
             modifier = Modifier.fillMaxWidth(),
         )
+        RunCheckCard(
+            checks = state.runChecks,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+        )
         DeviceInfoCard(
             deviceName = state.deviceName,
             socName = state.socName,
@@ -1020,14 +1028,104 @@ private fun ActivationStatusCard(
     }
 }
 
+/**
+ * Pre-flight checklist for the one-tap run: every dependency and system
+ * condition the run needs, with the blocking ones gating the button.
+ */
+@Composable
+private fun RunCheckCard(
+    checks: List<com.ghostlock.app.domain.model.RunCheck>,
+    modifier: Modifier = Modifier,
+) {
+    if (checks.isEmpty()) return
+    val blockingFailed = checks.count { !it.ok && it.blocking }
+    Card(
+        modifier = modifier,
+        insideMargin = PaddingValues(16.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.run_checks_title),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.run_checks_summary),
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+            )
+            checks.forEach { check ->
+                val labelRes = when (check.id) {
+                    RunCheckIds.KERNEL -> R.string.check_kernel
+                    RunCheckIds.PROFILE -> R.string.check_profile
+                    RunCheckIds.SHIZUKU_APP -> R.string.check_shizuku_app
+                    RunCheckIds.SHIZUKU_READY -> R.string.check_shizuku_ready
+                    RunCheckIds.KERNELSU_MANAGER -> R.string.check_kernelsu_manager
+                    else -> R.string.check_kernel
+                }
+                val stateRes = if (check.ok) {
+                    R.string.check_state_ok
+                } else if (check.blocking) {
+                    R.string.check_state_blocked
+                } else {
+                    R.string.check_state_optional
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        imageVector = if (check.ok) {
+                            Icons.Rounded.CheckCircleOutline
+                        } else {
+                            Icons.Rounded.ErrorOutline
+                        },
+                        contentDescription = null,
+                        tint = if (check.ok) {
+                            MiuixTheme.colorScheme.primary
+                        } else {
+                            MiuixTheme.colorScheme.error
+                        },
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(labelRes),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MiuixTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = stringResource(stateRes),
+                            fontSize = 13.sp,
+                            color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                        )
+                    }
+                }
+            }
+            if (blockingFailed > 0) {
+                Text(
+                    text = stringResource(R.string.run_checks_blocked, blockingFailed),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun DeviceInfoCard(
     deviceName: String,
     socName: String,
     kernelRelease: String,
     modifier: Modifier = Modifier,
-) {
-    Card(
+) {    Card(
         modifier = modifier,
         insideMargin = PaddingValues(16.dp),
     ) {

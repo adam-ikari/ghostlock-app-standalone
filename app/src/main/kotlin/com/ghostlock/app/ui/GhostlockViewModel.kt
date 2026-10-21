@@ -1,5 +1,6 @@
 package com.ghostlock.app.ui
 
+import com.ghostlock.app.data.ManagerScanner
 import android.net.Uri
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
@@ -45,6 +46,15 @@ sealed interface GhostlockEffect {
 }
 
 private const val OverwriteSummaryLimit = 12
+
+/** Stable ids of the pre-flight checks; the UI maps them to strings. */
+object RunCheckIds {
+    const val KERNEL = "kernel"
+    const val PROFILE = "profile"
+    const val SHIZUKU_APP = "shizuku_app"
+    const val SHIZUKU_READY = "shizuku_ready"
+    const val KERNELSU_MANAGER = "kernelsu_manager"
+}
 
 enum class DocumentRequest { ImportOffsetsHocon, ImportOffsetsJson, BootImage, XblImage, PayloadImage, UefiImage, VendorBootImage }
 
@@ -1073,6 +1083,7 @@ class GhostlockViewModel(
                 ?: return@withContext null
             runCatching { profileController.load(snapshot.kernelRelease, pair) }.getOrNull()
         }
+        val managers = withContext(Dispatchers.IO) { repository.installedManagers() }
         kernelSnapshot = snapshot
         mutableState.update {
             it.copy(
@@ -1090,8 +1101,85 @@ class GhostlockViewModel(
                 executionHasProfile = loaded?.hasProfile ?: false,
                 customCpuPair = loaded?.let(::customCpuPairOf),
                 selectedManagerPackage = repository.selectedManagerPackage(),
+                runChecks = runChecksOf(
+                    snapshot = snapshot,
+                    hasProfile = loaded?.hasProfile == true,
+                    invalidPaths = loaded?.invalidPaths ?: emptySet(),
+                    managers = managers,
+                ),
             )
         }
+    }
+
+    /**
+     * Pre-flight requirements of the one-tap run.
+     *
+     * Blocking checks gate the run (the app greys the button out); the rest
+     * are advisories, e.g. a missing KernelSU manager still yields uid 0, it
+     * just cannot load modules afterwards.
+     */
+    private fun runChecksOf(
+        snapshot: com.ghostlock.app.domain.model.KernelSnapshot,
+        hasProfile: Boolean,
+        invalidPaths: Set<String>,
+        managers: List<ManagerScanner.Candidate>,
+    ): List<com.ghostlock.app.domain.model.RunCheck> = buildList {
+        add(
+            com.ghostlock.app.domain.model.RunCheck(
+                id = RunCheckIds.KERNEL,
+                ok = snapshot.kernelSupported,
+                blocking = true,
+            ),
+        )
+        add(
+            com.ghostlock.app.domain.model.RunCheck(
+                id = RunCheckIds.PROFILE,
+                ok = hasProfile && invalidPaths.isEmpty(),
+                blocking = true,
+            ),
+        )
+        if (snapshot.shizukuEnabled) {
+            add(
+                com.ghostlock.app.domain.model.RunCheck(
+                    id = RunCheckIds.SHIZUKU_APP,
+                    ok = snapshot.shizukuInstalled,
+                    blocking = true,
+                ),
+            )
+            add(
+                com.ghostlock.app.domain.model.RunCheck(
+                    id = RunCheckIds.SHIZUKU_READY,
+                    ok = snapshot.shizukuStatus ==
+                        com.ghostlock.app.domain.model.ShizukuStatus.READY,
+                    blocking = true,
+                ),
+            )
+        } else {
+            /* The direct path does not need Shizuku, but the shell path is
+             * the one verified on most devices, so both stay visible. */
+            add(
+                com.ghostlock.app.domain.model.RunCheck(
+                    id = RunCheckIds.SHIZUKU_APP,
+                    ok = snapshot.shizukuInstalled,
+                    blocking = false,
+                ),
+            )
+            add(
+                com.ghostlock.app.domain.model.RunCheck(
+                    id = RunCheckIds.SHIZUKU_READY,
+                    ok = snapshot.shizukuStatus ==
+                        com.ghostlock.app.domain.model.ShizukuStatus.READY,
+                    blocking = false,
+                ),
+            )
+        }
+        add(
+            com.ghostlock.app.domain.model.RunCheck(
+                id = RunCheckIds.KERNELSU_MANAGER,
+                ok = managers.any { it.hasKsud },
+                blocking = false,
+            ),
+        )
     }
 
     private fun importDocuments(uris: List<String>) {
