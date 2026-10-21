@@ -117,21 +117,107 @@ report.rs 注释说明「0x400 是设备的 SLUB stride，不是 BTF sizeof」�
 （`cred=2104`、`pi_lock=2340`、`pi_waiters=2360`、`pi_blocked_on=2384`、`seccomp=2304`、`sched_task_group=840` …），
 符号偏移（`init_task` / `init_cred` / `selinux_enforcing` …）来自本镜像内嵌 kallsyms。
 
-## 6. 还没做完的（真机门禁）
+## 6. 真机验证记录（2026-10-21 ✅ 已通过）
 
-按上游规矩，**没在真机跑通就不算「已支持」**。设备接入后按顺序做：
+设备（通过宿主的 adb 操作，宿主 = 用户的 Windows 机器）：
 
-1. `adb shell uname -r` → 确认到底用 6.1.145 还是 6.1.115 那份 profile。
-2. `adb shell getenforce`、`ro.boot.flash.locked`、`/proc/kallsyms`、`/proc/iomem` 可见性
-   （`./scripts/titan2-props.sh` 一次收齐）。
-3. 装 app（`./gradlew :app:installDebug`），跑一次利用，**冷机、固定 CPU 对、单 route**。
-4. 看 `Download/ghostlock-debug-log/<时间>/*.log.txt` 里是否出现
-   `soc: mtk; kernel_phys_load=0x40000000` 与 `phys_offset=0x40000000`，以及 W1/W2/W3 写验证。
-5. 拿到 uid 0 后再走 KernelSU(ksud late-load) → ZygiskNext → LSPosed（见 brain 页 `temp-root-to-lsposed`）。
+| 项 | 值 |
+| --- | --- |
+| 序列号 | `TTANCN2100002663` |
+| 机型 / 固件 | Unihertz **Titan 2** / `Titan 2_V01.00.14`（Android **16**，BP2A.250605.031.A3） |
+| SoC | `mt6878` / `MT6878`（Dimensity 7300） |
+| `uname -r` | **`6.1.145-android14-11-gbd17012cc2f7-ab14044926`** ← 与 profile 的 `release` 逐字符一致 |
+| bootloader | `ro.boot.flash.locked=1`、`verifiedbootstate=green`（**锁定，全程没解锁**） |
+| SELinux | `Enforcing`（利用前） |
+| 已有 root | 无（`/data/adb` 不可读、无 `su`；只有 Shizuku） |
 
-> 注意：跑利用前设备上不能有 KernelSU 补丁或已加载的 KernelSU 模块（BakaSU / ReSukiSU / KowSU 同理）。
+跑的东西：
 
-## 7. 本机构建环境（真机阶段要用的）
+- native payload：上游 pre-release 的 `ghostlock`（241,400 B，sha256 `6890fd2a…`）
+  —— 与**我们本地构建并 strip 的产物 sha256 完全一致**（可复现）。
+- profile：我们导出的 GLK1 `.bin`（1,955 B，sha256 `3b7a1916…`）。
+
+命令（CLI 路线，shell 用户身份，无需 root）：
+
+```bash
+adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/profile.bin
+```
+
+结果（**第一次运行即成功**）：
+
+```
+[+] resolved profile loaded: 6.1.145-android14-11-gbd17012cc2f7-ab14044926
+[+] p0 profile phys_offset=0000000040000000 kernel_phys_load=0000000040000000 delta=0
+    slide_logger=ffffff8001ff29c8 init_task=ffffff8001fff600
+[*] tcp route enter page=ffffff80347f0000 ... attempts=2000 arm=16 hold=20000
+[*] tcp route done=1 calls=1 success=1 status=0 clean=1/1 step=0 errno=0
+[+] SELinux permissive            ← W1 写成功
+[+] child is root!                ← W2 写 cred 成功，child uid = 0
+[+] no app seccomp filter (adb/shell flow); skipping W3
+[-] temporary root ready; KernelSU module load pending
+```
+
+要点：
+
+- route `tcp_zerocopy` 一次命中（`clean=1/1`），没有回落到 `select_stack`；
+- `init_cred` 的 direct-map 地址 = `ffffff8002011a68`
+  = `0x2011a68`（镜像内偏移）`| 0xffffff8000000000`（MTK linear map）——与 native 的公式一致；
+- 利用自身抓到的 `/proc/iomem`：`40000000-4807ffff : System RAM`、
+  `40010000-41bbffff : Kernel code` → **DRAM 基址 0x40000000**，
+  独立验证了 profile 里 `kernel_phys_load = kernel_phys_offset = 0x40000000`；
+- SELinux policy 修复成功（`policy fixup rc=0`，随后恢复 enforcing）；
+- 临时 root 由 `root_child` 前端持有（native 进程存活期间有效），
+  并把 `/proc/iomem` 缓存到 `/data/local/tmp/.ghostlock_iomem`；
+- 缺 `ksud`（设备上没装 KernelSU 系管理器）→ `KernelSU module load pending`，
+  这是「临时 root → LSPosed」链路剩下的部分。
+
+## 7. 复现步骤
+
+```bash
+# 1) 设备事实（只读）
+adb shell uname -r                 # 6.1.145-android14-11-gbd17012cc2f7-ab14044926
+adb shell getprop ro.boot.flash.locked   # 1（锁定，不解锁）
+./scripts/titan2-props.sh | tee artifacts/props-$(date +%F).txt
+
+# 2) 把 native payload 与 profile 推上去
+adb push vendor/ghostlock-app/build/native/ghostlock /data/local/tmp/ghostlock
+adb push vendor/ghostlock-app/build/kernel-profiles/6.1.145-android14-11-gbd17012cc2f7-ab14044926.bin \
+        /data/local/tmp/profile.bin
+adb shell chmod 755 /data/local/tmp/ghostlock
+
+# 3) 跑（CLI 路线，shell 用户身份）
+adb shell /data/local/tmp/ghostlock --load-prebuilt-profile /data/local/tmp/profile.bin
+```
+
+注意事项：
+
+- 跑之前设备上**不能**有 KernelSU 补丁或已加载的 KernelSU 模块
+  （BakaSU / ReSukiSU / KowSU 同理）——会被利用当成干扰项。
+- 走 adb shell 时进程**没有 seccomp 过滤** → native 会跳过 W3 阶段（日志里会写明）。
+- native 进程存活期间临时 root 才有效（`root_child` 前端持有 root 凭据）；
+  想长期持有就让 KernelSU late-load 成功（见下）。
+
+## 8. 临时 root → LSPosed：还差什么
+
+临时 root 已经拿到，剩下的是把 KernelSU 拉起来（late-load），再挂 Xposed 框架：
+
+1. 装一个 **KernelSU 系管理器 APK**（官方 KernelSU / BakaSU / ReSukiSU / KowSU 均可），
+   它的 `libksud.so` 提供 `ksud`。
+2. 再跑一次利用 → root 脚本会执行
+   `ksud late-load --kmi android14-6.1 --allow-shell`
+   → 内存里加载 `android14-6.1_kernelsu.ko`（不改 boot、不改内核镜像），
+   并把 shell 用户纳入 root（`allow_shell=1`）。
+3. 装 **ZygiskNext**（Zygisk 的独立实现）到 `/data/adb/modules`，
+   再装 **Xposed 框架**（LSPosed 系；Android 16 用维护中的 JingMatrix/Vector）。
+4. 重新触发 `ksud late-load`（或 `ksud soft-reboot`）让模块的 stage 脚本执行，
+   ZygiskNext 的 monitor 会重起 zygote / system_server，注入才生效。
+5. 之后 LSPosed 管理器可用 → 装自己的 hook 模块（本项目要的是给
+   `hwkbd_ime` / `term-ime` / `titan_ir_remote` / `titan_dial` 增强）。
+
+> 注意：late-load 的 KernelSU 只存在于内存，**重启即失效**；要长期用只能解锁 + 刷 boot
+> （本项目的非目标）。
+
+## 9. 本机构建环境（真机阶段要用的）
 
 | 东西 | 位置 / 做法 |
 | --- | --- |
