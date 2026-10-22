@@ -21,6 +21,7 @@ import com.ghostlock.app.domain.model.ProfileConfig
 import com.ghostlock.app.domain.model.UserProfileFile
 import com.ghostlock.app.domain.repository.GhostlockRepository
 import com.ghostlock.app.domain.repository.ProfileConfigController
+import com.ghostlock.app.shizuku.LspdModuleStaging
 import com.ghostlock.app.shizuku.ShizukuExploitRunner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -209,6 +210,21 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                 }.onFailure { onLog("<k> warning: cannot stage $name: ${it.message}") }
                     .onSuccess { onLog("<k> staged module $name (${out.length()} bytes)") }
             }
+        }
+
+    /**
+     * The module directory to hand to the native root script, or null when the
+     * user selected no component packages.
+     *
+     * The native side treats a null as "do not touch the LSPosed stack at
+     * all": installing and activating ZygiskNext/Vector restarts system_server,
+     * and an unlucky ordering there drops the device into recovery. Keeping
+     * that out of the plain one-tap root path is deliberate — the stack is
+     * only brought up when the user actually asked for it.
+     */
+    private suspend fun publishLspdModules(): String? =
+        withContext(Dispatchers.IO) {
+            LspdModuleStaging.publish(appContext)
         }
 
     /** True when the package is installed (Shizuku ships as its own app). */
@@ -488,6 +504,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                         profileBlob
                     }
                     dumpRuntimeProfile(archivedLog, writeSidecar, release, pair, runtimeBlob)
+                    /* The user service runs in the shell domain, so the module
+                     * zips have to be published to a directory it can read
+                     * before the native starts. */
+                    stageLspdStackModules(archivedLog)
+                    val publishedModules = publishLspdModules()
+                    if (publishedModules != null) {
+                        archivedLog("<k> LSPosed component packages published: $publishedModules")
+                    }
                     archivedLog("<b> starting UserService")
                     resetRunState()
                     val code = shizukuRunner.run(
@@ -654,8 +678,13 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             if (ksud != null) onLog("<k> ksud ready: ${ksud.absolutePath}") else onLog("<k> warning: ksud not found")
             /* The Zygisk / LSPosed stack is installed by the native root script
              * right after the late-load, so the zips have to be in place before
-             * the native starts. */
+             * the native starts. Publishing is opt-in: with no component
+             * packages selected the native skips the stack entirely. */
             stageLspdStackModules(onLog)
+            val publishedModules = publishLspdModules()
+            if (publishedModules != null) {
+                onLog("<k> LSPosed component packages published: $publishedModules")
+            }
             // U01-S14: a per-run KernelSU log path so a previous run's markers
             // can never satisfy the handoff probe; passed to the native process.
             val ksuLog = File(workDir, ksuLogName(System.currentTimeMillis()))
@@ -732,11 +761,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     environment()["HOME"] = workDir.absolutePath
                     environment()["GHOSTLOCK_KSU_LOG"] = ksuLog.absolutePath
                     if (ksud != null) environment()["GHOSTLOCK_KSUD"] = ksud.absolutePath
-                    /* The native root script looks for the module zips here: it runs
-                     * in the shell domain and cannot read the app's private dir
-                     * on the Shizuku path. */
-                    environment()["GHOSTLOCK_LSPD_MODULES"] =
-                        File(filesDir, LspdStackDirectory).absolutePath
+                    /* Only when the user actually selected component packages:
+                     * the native root script then installs the ZygiskNext /
+                     * Vector stack. Leaving this unset keeps the one-tap root
+                     * path free of the system_server restart that can drop the
+                     * device into recovery. */
+                    publishedModules?.let { modulesDir ->
+                        environment()["GHOSTLOCK_LSPD_MODULES"] = modulesDir
+                    }
                 }
             onLog("<b> starting native: ${binary.absolutePath}")
             resetRunState()

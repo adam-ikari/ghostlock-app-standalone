@@ -120,6 +120,14 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                         if (ksudPath != null) {
                             environment()["GHOSTLOCK_KSUD"] = ksudPath.absolutePath
                         }
+                        /* The native root script installs the ZygiskNext /
+                         * Vector stack only when this is set. The user service
+                         * runs in the shell domain, so it cannot read the app
+                         * private dir itself — the app copies the zips there
+                         * before the run (see LspdModuleStaging). */
+                        LspdModuleStaging.stagedModulesDir(context)?.let { modulesDir ->
+                            environment()["GHOSTLOCK_LSPD_MODULES"] = modulesDir
+                        }
                     }
                     .start()
                     .let { process ->

@@ -409,87 +409,83 @@ namespace ghostlock::attack {
             "  echo \"[*] kernelsu already loaded; restoring enforcing\" >>\"$LOG\"\n"
             "  echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
             "fi\n"
-            /* Titan 2 集成：把 ZygiskNext / Vector(LSPosed) 这条栈按**正确时序**拉起来。
-             * 放在这里是因为 root 脚本是利用成功后唯一天然拥有 uid 0 的执行点
-             * （app 自己不是 root；Shizuku 每次重启都要重起，不满足「一键」）。
+            /* ZygiskNext / Vector(LSPosed) 栈的安装与激活。
              *
-             * 时序（顺序错了会掉进 recovery，务必保持）：
-             *   1) late-load 一次 → KernelSU 进内存，shell 用户拿到 su
-             *   2) 装模块（经 su + 已安装那份 ksud；先删旧模块目录）
-             *   3) 再 late-load → 模块被 apply，stage 脚本被跑
-             *   4) 起 ZygiskNext 守护进程 → 它把注入点挂进 zygote
-             *   5) 等 zygote 真的挂上（最长 60s）
-             *   6) 再等 60s 让注入稳定，然后才起 Vector daemon
+             * 这一段是**可选**的：只有 app 显式设置 GHOSTLOCK_LSPD_MODULES
+             * （用户选了组件包）时才执行。没设置就直接跳过，
+             * 「一键 root」永远不会因为它把设备带进 recovery。
+             *
+             * 时序与 docs/titan2-ondevice-flow.md 里真机验证过的手写流程
+             * **逐条一致**，任何一步的顺序变了都会掉进 recovery
+             * （recovery 里 adbd 关着，adb/fastboot 都够不着，只能长按电源键）：
+             *   ① KernelSU 进内存（上面那次 late-load 的副产物）→ shell 拿到 su
+             *   ② su 域：先删旧模块目录（**只删一次，在装之前**），再逐个装模块
+             *      （必须用已安装那份 /data/adb/ksu/bin/ksud；ksu 域执行不了
+             *        app 目录里的 libksud.so）
+             *   ③ su 域：再 late-load 一次（apply 模块 + 跑 stage 脚本）
+             *   ④ su 域：起 ZygiskNext 守护进程 → 它把注入点挂进 zygote
+             *   ⑤ 等 zygote 真的挂上（znctl status → zygote_states:1）
+             *   ⑥ 再等 60 秒让注入稳定，然后才起 Vector daemon
              *      （它靠重启 system_server 注入服务；注入没稳就重启 →
              *       framework 起不来 → rescue party → recovery）
-             * 少一步或顺序反了都会掉进 recovery（recovery 里 adbd 关着，
-             * adb/fastboot 全够不着，只能长按电源键）。
-             * 纯字符串改动，不触碰任何攻击代码。 */
-            "MODZIP_DIR=\"\"\n"
-            "if [ -d \"$HOME_DIR/modules\" ]; then MODZIP_DIR=\"$HOME_DIR/modules\"; fi\n"
-            "if [ -z \"$MODZIP_DIR\" ] && [ -n \"$GHOSTLOCK_LSPD_MODULES\" ]; then\n"
-            "  if [ -d \"$GHOSTLOCK_LSPD_MODULES\" ]; then MODZIP_DIR=\"$GHOSTLOCK_LSPD_MODULES\"; fi\n"
-            "fi\n"
-            "if [ -z \"$MODZIP_DIR\" ]; then\n"
-            "  for d in /data/data/*/files/modules; do\n"
-            "    [ -d \"$d\" ] || continue\n"
-            "    if ls \"$d\"/*.zip >/dev/null 2>&1; then MODZIP_DIR=\"$d\"; break; fi\n"
-            "  done\n"
-            "fi\n"
-            "echo \"[*] modules dir=$MODZIP_DIR\" >>\"$LOG\"\n"
-            "if [ -n \"$MODZIP_DIR\" ] && [ -d \"$MODZIP_DIR\" ]; then\n"
-            "  echo \"[*] late-load (pre-modules)\" >>\"$LOG\"\n"
-            "  \"$KSUD\" late-load --kmi \"$KMI\" --allow-shell >>\"$LOG\" 2>&1\n"
-            "  echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
+             * 少一步或顺序反了都会掉进 recovery，所以这段脚本刻意保守：
+             * 拿不到 zygote 就**不**起 Vector daemon，宁可不激活 LSPosed，
+             * 也不冒把设备带进 recovery 的风险。 */
+            "if [ -n \"$GHOSTLOCK_LSPD_MODULES\" ] && [ -d \"$GHOSTLOCK_LSPD_MODULES\" ]; then\n"
+            "  MODZIP_DIR=\"$GHOSTLOCK_LSPD_MODULES\"\n"
+            "  echo \"[*] modules dir=$MODZIP_DIR\" >>\"$LOG\"\n"
             "  SU=/system/bin/su\n"
             "  KSU_KSUD=/data/adb/ksu/bin/ksud\n"
-            "  for z in \"$MODZIP_DIR\"/*.zip; do\n"
-            "    [ -f \"$z\" ] || continue\n"
-            "    echo \"[*] installing module $z\" >>\"$LOG\"\n"
-            "    rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu\n"
-            "    if [ -x \"$SU\" ] && [ -x \"$KSU_KSUD\" ]; then\n"
-            "      \"$SU\" -c \"$KSU_KSUD module install $z\" >>\"$LOG\" 2>&1\n"
-            "    else\n"
-            "      \"$KSUD\" module install \"$z\" >>\"$LOG\" 2>&1\n"
-            "    fi\n"
-            "    echo \"[*] module install exit=$?\" >>\"$LOG\"\n"
-            "  done\n"
-            "  echo \"[*] late-load (modules)\" >>\"$LOG\"\n"
-            "  \"$KSUD\" late-load --kmi \"$KMI\" --allow-shell >>\"$LOG\" 2>&1\n"
-            "  echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
-            "  echo \"[*] starting zygisk daemon (post-fs-data)\" >>\"$LOG\"\n"
-            "  \"$KSUD\" post-fs-data >>\"$LOG\" 2>&1 &\n"
-            "  sleep 8\n"
-            "  ZNCTL=/data/adb/ksu/bin/znctl\n"
-            "  ZGONE=0\n"
-            "  i=0\n"
-            "  while [ $i -lt 60 ]; do\n"
-            "    if [ -x \"$ZNCTL\" ] && \"$ZNCTL\" status 2>/dev/null | grep -q 'zygote_states:1'; then\n"
-            "      ZGONE=1\n"
-            "      break\n"
-            "    fi\n"
-            "    sleep 1\n"
-            "    i=$((i+1))\n"
-            "  done\n"
-            "  echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
-            "  if [ \"$ZGONE\" = \"1\" ]; then\n"
-            "    echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
-            "    sleep 60\n"
-            "    if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
-            "      echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
-            "      cd /data/adb/modules/zygisk_vector && ./daemon --system-server-max-retry=3 >>\"$LOG\" 2>&1 &\n"
-            "      sleep 8\n"
-            "    fi\n"
+            "  if [ ! -x \"$SU\" ] || [ ! -x \"$KSU_KSUD\" ]; then\n"
+            "    echo '[!] su or installed ksud missing; skipping LSPosed stack' >>\"$LOG\"\n"
             "  else\n"
-            "    echo '[!] zygote not patched; skipping Vector daemon to avoid the system_server restart loop' >>\"$LOG\"\n"
+            "    echo '[*] removing stale module dirs' >>\"$LOG\"\n"
+            "    \"$SU\" -c 'rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu' >>\"$LOG\" 2>&1\n"
+            "    for z in \"$MODZIP_DIR\"/*.zip; do\n"
+            "      [ -f \"$z\" ] || continue\n"
+            "      echo \"[*] installing module $z\" >>\"$LOG\"\n"
+            "      \"$SU\" -c \"$KSU_KSUD module install '$z'\" >>\"$LOG\" 2>&1\n"
+            "      echo \"[*] module install exit=$?\" >>\"$LOG\"\n"
+            "    done\n"
+            "    echo '[*] late-load (apply modules)' >>\"$LOG\"\n"
+            "    \"$SU\" -c \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
+            "    echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
+            "    echo '[*] starting zygisk daemon (post-fs-data)' >>\"$LOG\"\n"
+            "    \"$SU\" -c \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
+            "    sleep 8\n"
+            "    ZNCTL=/data/adb/ksu/bin/znctl\n"
+            "    ZGONE=0\n"
+            "    i=0\n"
+            "    while [ $i -lt 60 ]; do\n"
+            "      if [ -x \"$ZNCTL\" ] && \"$SU\" -c \"$ZNCTL status\" 2>/dev/null | grep -q 'zygote_states:1'; then\n"
+            "        ZGONE=1\n"
+            "        break\n"
+            "      fi\n"
+            "      sleep 1\n"
+            "      i=$((i+1))\n"
+            "    done\n"
+            "    echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
+            "    if [ \"$ZGONE\" = \"1\" ]; then\n"
+            "      echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
+            "      sleep 60\n"
+            "      if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
+            "        echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
+            "        \"$SU\" -c 'cd /data/adb/modules/zygisk_vector && (./daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &)' >>\"$LOG\" 2>&1\n"
+            "        sleep 8\n"
+            "      fi\n"
+            "    else\n"
+            "      echo '[!] zygote not patched; skipping Vector daemon to avoid the system_server restart loop' >>\"$LOG\"\n"
+            "    fi\n"
+            "    if [ -x /data/adb/modules/zygisk_vector/cli ]; then\n"
+            "      echo '== vector cli status ==' >>\"$LOG\"\n"
+            "      \"$SU\" -c '/data/adb/modules/zygisk_vector/cli status' >>\"$LOG\" 2>&1\n"
+            "      echo '== zygisk next status ==' >>\"$LOG\"\n"
+            "      \"$SU\" -c \"$ZNCTL status\" >>\"$LOG\" 2>&1\n"
+            "    fi\n"
+            "    echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
             "  fi\n"
-            "  if [ -x /data/adb/modules/zygisk_vector/cli ]; then\n"
-            "    echo '== vector cli status ==' >>\"$LOG\"\n"
-            "    /data/adb/modules/zygisk_vector/cli status >>\"$LOG\" 2>&1\n"
-            "    echo '== zygisk next status ==' >>\"$LOG\"\n"
-            "    \"$ZNCTL\" status >>\"$LOG\" 2>&1\n"
-            "  fi\n"
-            "  echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
+            "else\n"
+            "  echo '[*] no LSPosed component packages selected; skipping the stack' >>\"$LOG\"\n"
             "fi\n"
             "else\n"
             "  echo '[!] fixup failed; SELinux left permissive' >>\"$LOG\"\n"
