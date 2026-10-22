@@ -503,32 +503,55 @@ namespace ghostlock::attack {
              * manager's uid carries, so it runs the ksud from the app package
              * (the installed one at /data/adb/ksu/bin/ksud lacks them). */
             "    \"$SU\" -c \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
-            /* Give the zygisk daemon a moment to come up before zygote is
-             * restarted, otherwise the new zygote starts without the
-             * injection. The check reads /proc directly: `ps -A` walks every
-             * process's cmdline and stalls in the shell domain. */
-            "    sleep 6\n"
-            /* zygisk 模块是在 zygote 启动的那一刻被 preload 的。运行时装模块
-             * 不会影响已经跑着的 zygote，所以必须重启它，让 ZygiskNext 的
-             * injector 接管新起的 zygote（新的 zygote 带 -Xzygote 参数，
-             * Vector 的 zygisk 模块也会被 preload）。
-             * webview_zygote 是 zygote64 的子进程，杀 zygote64 会一起带走它；
-             * 只杀一个会让 framework 起不来 → recovery。 */
-            "    echo '[*] restarting zygote64 so the zygisk modules get preloaded' >>\"$LOG\"\n"
-            "    OLD_ZYGOTE=$(pidof zygote64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
-            "    if [ -n \"$OLD_ZYGOTE\" ]; then\n"
-            "      echo \"[*] killing zygote64 pid=$OLD_ZYGOTE\" >>\"$LOG\"\n"
-            "      kill -9 $OLD_ZYGOTE >>\"$LOG\" 2>&1\n"
-            "    fi\n"
-            "    ZNCTL=/data/adb/ksu/bin/znctl\n"
-            /* One su call for the whole wait: forking su per poll is slow
-             * enough in the shell domain that 90 polls never finish. The
-             * helper script runs inside su (ksu domain) and stops as soon as
-             * the zygisk modules are preloaded into the new zygote. */
-            "    cat >/data/local/tmp/.ghostlock_znwait.sh <<'ZNWAITEOF'\n"
+            /* ------------------------------------------------------------------
+             * zygisk 模块是在 zygote 启动的那一刻被 preload 的。运行时装模块
+             * 对已经跑着的 zygote 没有任何影响，所以必须重启 zygote，让
+             * ZygiskNext 的 injector 接管新起的那个（新的 zygote 带 -Xzygote
+             * 参数，Vector 的 zygisk 模块也一并被 preload）。
+             *
+             * 【硬前置条件】杀 zygote 之前，zygiskd 必须已经就绪：
+             *   - inject_state:1  → 它已经装好 execve hook，等着注入新 zygote
+             *   - modules64 含 zygisk_vector → Vector 的 zygisk 模块在列表里
+             * 少了这一步，新起的 zygote 不会被注入，system_server 就残缺 →
+             * rescue party → recovery（2026-10-22 实测 3 次里 2 次栽在这）。
+             * 不满足就**不杀 zygote**，本轮到此为止：宁可这次没激活 LSPosed，
+             * 也不把设备带进 recovery。
+             *
+             * 轮询全部在 su（ksu 域）里一次跑完：shell 域每 fork 一次 su 要
+             * 几百毫秒，逐次轮询根本跑不完。
+             * ------------------------------------------------------------------ */
+            "    cat >/data/local/tmp/.ghostlock_znready.sh <<'ZNREADYEOF'\n"
             "#!/system/bin/sh\n"
             "i=0\n"
-            "while [ $i -lt 90 ]; do\n"
+            "while [ $i -lt 60 ]; do\n"
+            "  s=$(/data/adb/ksu/bin/znctl status 2>/dev/null)\n"
+            "  case \"$s\" in\n"
+            "    *inject_state:1*) case \"$s\" in *zygisk_vector*) echo \"$s\"; exit 0;; esac;;\n"
+            "  esac\n"
+            "  sleep 1\n"
+            "  i=$((i+1))\n"
+            "done\n"
+            "exit 1\n"
+            "ZNREADYEOF\n"
+            "    ZREADY=$(timeout 90 \"$SU\" -c 'sh /data/local/tmp/.ghostlock_znready.sh' 2>/dev/null)\n"
+            "    if [ -z \"$ZREADY\" ]; then\n"
+            "      echo '[!] zygisk daemon not ready (no inject_state:1 / zygisk_vector); NOT restarting zygote' >>\"$LOG\"\n"
+            "      echo '[!] the LSPosed stack stays inactive this run; run it again once the daemon is up' >>\"$LOG\"\n"
+            "    else\n"
+            "      echo '[*] zygisk daemon ready' >>\"$LOG\"\n"
+            /* webview_zygote 是 zygote64 的子进程，杀 zygote64 会一起带走它；
+             * 只杀一个会让 framework 起不来 → recovery。 */
+            "      OLD_ZYGOTE=$(pidof zygote64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
+            "      if [ -n \"$OLD_ZYGOTE\" ]; then\n"
+            "        echo \"[*] killing zygote64 pid=$OLD_ZYGOTE\" >>\"$LOG\"\n"
+            "        kill -9 $OLD_ZYGOTE >>\"$LOG\" 2>&1\n"
+            "      fi\n"
+            /* 注入确认：等 zygote_states:1。没注入成功就**不**起 Vector
+             * daemon —— 它会重启 system_server，注入没稳时那一步必进 recovery。 */
+            "      cat >/data/local/tmp/.ghostlock_znwait.sh <<'ZNWAITEOF'\n"
+            "#!/system/bin/sh\n"
+            "i=0\n"
+            "while [ $i -lt 120 ]; do\n"
             "  s=$(/data/adb/ksu/bin/znctl status 2>/dev/null)\n"
             "  case \"$s\" in *zygote_states:1*) echo \"$s\"; exit 0;; esac\n"
             "  sleep 1\n"
@@ -536,37 +559,29 @@ namespace ghostlock::attack {
             "done\n"
             "exit 1\n"
             "ZNWAITEOF\n"
-            "    ZSTAT=$(timeout 120 sh /data/local/tmp/.ghostlock_znwait.sh 2>/dev/null)\n"
-            "    ZGONE=0\n"
-            "    if [ -n \"$ZSTAT\" ]; then ZGONE=1; fi\n"
-            "    echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
-            /* Vector's zygisk module must be in the list too, otherwise the
-             * daemon has nothing to inject and stays useless. */
-            "    ZMODS=$(echo \"$ZSTAT\" | grep '^modules64:' | head -1)\n"
-            "    if [ -z \"$ZMODS\" ]; then ZMODS=$(/data/adb/ksu/bin/znctl status 2>/dev/null | grep '^modules64:' | head -1); fi\n"
-            "    echo \"[*] zygisk modules: $ZMODS\" >>\"$LOG\"\n"
-            "    if [ \"$ZGONE\" = \"1\" ] && echo \"$ZMODS\" | grep -q 'zygisk_vector'; then\n"
-            "      echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
-            "      sleep 60\n"
-            "      if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
-            "        echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
-            /* 必须用**绝对路径**：daemon 脚本内部用 dir="${0%/*}" 定位自己的
-             * 目录，相对路径会让 -Djava.class.path=daemon.apk 变成相对路径 →
+            "      ZSTAT=$(timeout 150 \"$SU\" -c 'sh /data/local/tmp/.ghostlock_znwait.sh' 2>/dev/null)\n"
+            "      ZGONE=0\n"
+            "      if [ -n \"$ZSTAT\" ]; then ZGONE=1; fi\n"
+            "      echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
+            "      if [ \"$ZGONE\" = \"1\" ]; then\n"
+            "        echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
+            "        sleep 60\n"
+            "        if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
+            "          echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
+            /* 必须用**绝对路径**：daemon 脚本内部用 dirname 定位自己的目录，
+             * 相对路径会让 -Djava.class.path=daemon.apk 变成相对路径 →
              * UnsatisfiedLinkError → daemon 静默退出（2026-10-22 真机踩到）。
              * toybox 的 unshare 不支持 --propagation slave，只能用 -m。 */
-            "        unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &\n"
-            "        sleep 20\n"
+            "          \"$SU\" -c 'unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &' >>\"$LOG\" 2>&1\n"
+            "          sleep 20\n"
+            "        fi\n"
+            "      else\n"
+            "        echo '[!] zygote not injected; skipping Vector daemon to avoid the system_server restart loop' >>\"$LOG\"\n"
             "      fi\n"
-            "    elif [ \"$ZGONE\" = \"1\" ]; then\n"
-            "      echo '[!] zygisk module list has no zygisk_vector; skipping Vector daemon' >>\"$LOG\"\n"
-            "    else\n"
-            "      echo '[!] zygote not patched; skipping Vector daemon to avoid the system_server restart loop' >>\"$LOG\"\n"
             "    fi\n"
-            "    if [ -x /data/adb/modules/zygisk_vector/cli ]; then\n"
-            "      echo '== vector cli status ==' >>\"$LOG\"\n"
-            "      /data/adb/modules/zygisk_vector/cli status >>\"$LOG\" 2>&1\n"
+            "    if [ -x /data/adb/ksu/bin/znctl ]; then\n"
             "      echo '== zygisk next status ==' >>\"$LOG\"\n"
-            "      $ZNCTL status >>\"$LOG\" 2>&1\n"
+            "      /data/adb/ksu/bin/znctl status >>\"$LOG\" 2>&1\n"
             "    fi\n"
             "    echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
             "  fi\n"
