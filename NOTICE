@@ -1,0 +1,33 @@
+GhostLock — Titan 2 临时 root / LSPosed 激活前端
+Copyright 2026 the GhostLock project
+https://github.com/YuKongA/ghostlock-app
+
+本仓库整体按 PolyForm Noncommercial License 1.0.0（见 LICENSE）提供：
+代码公开、可读、可改、可自行编译，**禁止商业用途**。商业授权需单独取得书面许可。
+
+This project as a whole is licensed under the PolyForm Noncommercial
+License 1.0.0 (see LICENSE). Commercial use requires a separate written
+license from the project owner.
+
+## 仓库内包含的第三方代码
+
+| 路径 | 来源 | 许可 |
+| --- | --- | --- |
+| `src/core/kernelsnitch/{futex_hash,kernelsnitch,timeutils,utils}.h` | [NebuSec/CyberMeowfia](https://github.com/NebuSec/CyberMeowfia) 原样移植 | Apache-2.0（全文见 `LICENSES/Apache-2.0.txt`） |
+| `src/core/kernelsnitch/futex_hash.h` 内的 jhash 部分 | Bob Jenkins lookup3（public domain）+ Linux 内核中的修改版，版权行保留在文件头 | public domain / 见文件头 |
+
+`src/core/kernelsnitch/number_parse.h`、`scan_bounds.h` 为本项目自有代码。
+其余代码为本项目原创。
+
+## 不包含、由用户在运行时自行获取的组件
+
+本仓库**不打包、不分发**下列组件。app 只从上游 release（或用户自备的反代）下载，装不装由用户决定：
+
+| 组件 | 来源 | 许可 |
+| --- | --- | --- |
+| ZygiskNext | https://github.com/Dr-TSNG/ZygiskNext | All rights reserved，其许可禁止再分发——因此**永远不随 APK 分发** |
+| Vector（LSPosed 系） | https://github.com/JingMatrix/Vector | GPL-3.0 |
+| KernelSU 管理器 | https://github.com/tiann/KernelSU | GPL-3.0 |
+
+本仓库历史中不含上述组件的二进制：早期版本曾把两个模块 zip 放进 `app/src/main/assets/modules/`，
+该路径已在 2026-10-22 通过历史重写从全部提交中剔除（`git rev-list --objects --all` 中已无相关对象）。

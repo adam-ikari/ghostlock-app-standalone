@@ -67,8 +67,13 @@ build/extract/release/ghostlock-extract OTA.zip --format conf --out profile.conf
 
 ## 来源与许可证
 
-采用 [Apache License 2.0](LICENSE)，基于以下项目：
+本项目整体采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：代码公开、可读、可改、可自行编译，**禁止商业用途**；商业授权需单独取得书面许可。这不是 OSI 定义的开源许可，按惯例称 source-available。
 
-- [NebuSec/CyberMeowfia](https://github.com/NebuSec/CyberMeowfia)
-- [JoinChang/ghostlock-oneplus](https://github.com/JoinChang/ghostlock-oneplus)
-- [x-spy/CVE-2026-43499-popsicle](https://github.com/x-spy/CVE-2026-43499-popsicle)
+`src/core/kernelsnitch/` 的 `futex_hash.h`、`kernelsnitch.h`、`timeutils.h`、`utils.h` 移植自
+[NebuSec/CyberMeowfia](https://github.com/NebuSec/CyberMeowfia)（Apache-2.0），许可全文见
+[`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt)，完整归属见 [`NOTICE`](NOTICE)。
+
+研究阶段参考过 [JoinChang/ghostlock-oneplus](https://github.com/JoinChang/ghostlock-oneplus) 与
+[x-spy/CVE-2026-43499-popsicle](https://github.com/x-spy/CVE-2026-43499-popsicle)。
+
+ZygiskNext、Vector、KernelSU 管理器都不随本仓库或 APK 分发，由用户运行时自行获取。

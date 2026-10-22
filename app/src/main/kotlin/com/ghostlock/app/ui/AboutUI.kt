@@ -176,7 +176,7 @@ internal fun AboutScreen(onBack: () -> Unit) {
                 SmallTitle(text = stringResource(R.string.about_open_source))
             }
             item(key = "license") {
-                AboutLink("Apache License 2.0", "github.com/YuKongA/ghostlock-app/LICENSE") {
+                AboutLink("PolyForm Noncommercial 1.0.0", "github.com/YuKongA/ghostlock-app/LICENSE") {
                     uriHandler.openUri("https://github.com/YuKongA/ghostlock-app/blob/main/LICENSE")
                 }
             }
