@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, blockers, open-questions]
 created: "2026-10-21T03:35:43"
-updated: "2026-10-22T17:48:21"
+updated: "2026-10-22T17:54:21"
 ---
 
 <!-- compiled_truth -->
@@ -141,3 +141,9 @@ updated: "2026-10-22T17:48:21"
   summary: "B9（新增）：app 路线的 root child 落在 u:r:kernel:s0，不是能做事的域。利用把 cred 换成 init_cred 后上下文就是 kernel；enforcing 下 kernel 域连 /system/bin/sh 都 exec 不了（dmesg: exec sh: Permission denied），su 也卡死（脚本阻塞在 pipe_read）。而策略重载 load_policy 与 ksud late-load 都会把 SELinux 从 permissive 拉回 enforcing —— 所以 app 路线在 late-load 之后必然做不完模块安装。对照：su 从 shell 域正常（adb shell su -c id → u:r:ksu:s0），CLI 路线之所以成立就是因为脚本由 adb shell 进程执行并 su 进 ksu 域。之前把 app 路线两次「掉线」归因成内核 oops 是错的：本次 pstore 无 Oops，实际是 [ -x /system/bin/su ] 的 stat 卡在 magic mount 上导致 adb 无响应"
   source: "dmesg.txt scontext=u:r:kernel:s0（pid 17443/25426）+ files/ghostlock-ksu-1792661397218.log + 宿主 adb shell su 对照；artifacts/2026-10-22-device-dump"
   affects: [porting-blockers, temp-root-to-lsposed]
+
+- time: 2026-10-22T17:54:21
+  kind: decision
+  summary: "B9 的处置已定：先跑 P1（把需要 exec 的步骤放进 permissive 窗口，late-load 挪到最后），不先动攻击关键路径。当前对外口径是「CLI 路线可用、app 路线在修」，见 [[app-route-decisions]]"
+  source: brain/app-route-decisions.md
+  affects: [porting-blockers]

@@ -120,3 +120,28 @@ permissive 位），把 permissive 拿回来，然后继续执行。
 - `logcat.txt`：整段 logcat
 
 （`glk-dump3.tgz` 传输失败，内容与 dump2 重叠，只有 `/data/adb/modules` 列表缺失。）
+
+## 决策（2026-10-22）
+
+同一份记录也在 brain `app-route-decisions`。
+
+**D1 先跑 P1，不再走「少写内核」这条路。**
+需要 exec 的步骤全部放进 SELinux permissive 窗口：装模块 → `post-fs-data`
+（zygiskd 起来）→ 等 `inject_state:1` → 起 Vector daemon → 重启 zygote →
+**最后**才 `late-load`。判据：一轮真机出现 `[+] KernelSU module loaded`
++ `[*] module install step finished` + `inject_state:1` + LSPosed 管理器
+Framework 2.2 / API 102，且设备不掉线。若 zygote 重启时注入不成立
+（此时 kernelsu.ko 尚未加载），才转 P2。
+
+**D2 app 路线不用 su，也不对 magic mount 做 stat。**
+su 从 kernel 域卡死在 `pipe_read`（`timeout` 杀不掉），从 shell 域正常；
+`[ -x /system/bin/su ]` 会阻塞整个脚本（两次 app 运行都死在这里）。
+
+**D3 当前对外口径：CLI 路线可用，app 路线在修。**
+分发 README、文档、app 内表述都按此写，不把 app 路线写成已验证。
+
+**D4 P2 冻结。** late-load 之后补一次 `selinux_state` 写属于多一轮内核写，
+按上游 AGENTS.md 要计划文档 + `cmp_disasm` 8 函数 + 真机门禁，只有 P1 判死才启动。
+
+**D5 遗留开关在 P1 定论后清理。** `GHOSTLOCK_SELINUX_FIXUP` 默认 1（不启用跳过）；
+W3 前的 `finit_module` 预探针保留但不算解法；避免同一问题留两套机制。

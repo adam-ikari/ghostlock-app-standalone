@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-22T17:48:31"
+updated: "2026-10-22T17:54:21"
 ---
 
 <!-- compiled_truth -->
@@ -153,3 +153,9 @@ profile 里的 `recommend_shizuku` 字段全部移除）。
   summary: "app 路线执行顺序的硬约束（2026-10-22 真机）：root child = u:r:kernel:s0，只能在 SELinux permissive 窗口内做事；策略重载（load_policy）和 ksud late-load 都会把它推回 enforcing。因此 app 路线要么把「装模块 / post-fs-data / 起 Vector daemon / 重启 zygote」全部放在 late-load 之前（路线 P1），要么在 late-load 之后再补一次 selinux_state 写（路线 P2，属攻击关键路径改动，需计划+cmp_disasm+门禁）。su 不可用：app 路线里 su 从 kernel 域卡死在 pipe_read，从 shell 域正常"
   source: "docs/titan2-app-route-domain-2026-10-22.md；artifacts/2026-10-22-device-dump"
   affects: [temp-root-to-lsposed]
+
+- time: 2026-10-22T17:54:21
+  kind: decision
+  summary: "app 路线的执行顺序与禁令已定稿，见 [[app-route-decisions]]：P1 顺序（装模块 → post-fs-data → 等 inject_state:1 → Vector daemon → 重启 zygote → 最后 late-load），app 路线禁用 su 与 magic mount stat，P2（late-load 后补 selinux 写）冻结到 P1 被真机判死为止"
+  source: brain/app-route-decisions.md
+  affects: [temp-root-to-lsposed, porting-blockers]

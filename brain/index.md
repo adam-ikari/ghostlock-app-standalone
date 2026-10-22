@@ -1,7 +1,8 @@
 # Brain Index
 
-_Auto-generated. Last updated 2026-10-22T09:48:31.099Z._
+_Auto-generated. Last updated 2026-10-22T09:54:21.285Z._
 
+- [app-route-decisions](pages/app-route-decisions.md) — category: project | tags: [lsposed, kernelsu, selinux, app-route] | ## 决策（2026-10-22，约束来自真机取证）
 - [ghostlock-cve-2026-43499](pages/ghostlock-cve-2026-43499.md) — category: concept | tags: [ghostlock, exploit, android] | ## 漏洞本体
 - [ghostlock-profile-workflow](pages/ghostlock-profile-workflow.md) — category: reference | tags: [ghostlock, profile, mediatek, workflow] | ## 官方流程（上游 `docs/kernel_profiles/README.md`）
 - [local-toolchain-gotchas](pages/local-toolchain-gotchas.md) — category: reference | tags: [toolchain, ndk, rust, build] | ## 1. extractor 的 rustc 版本门槛
