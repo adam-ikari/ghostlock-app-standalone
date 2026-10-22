@@ -93,3 +93,49 @@ root 脚本现在会把 exploit 留下的 permissive 用 `load_policy` 恢复成
 
 因此本计划的「少动内核」方向只对了一半：真正要改的是**执行顺序**（把活干在
 permissive 窗口内，late-load 挪到最后），见该文档的路线 P1 / P2。
+
+## 批次记录：P1 实现（构建 593，待真机门禁）
+
+**级别与动机**：M 级（`src/core/attack/ops.cpp` 的 root 脚本正文 + Kotlin 环境变量），
+不触 W1/W2/W3 与 race/waiter/payload 路径。动机见上一节的域结论：脚本里的 root child
+在 `u:r:kernel:s0`，late-load 之后该域 exec 全被拒，必须把需要 exec 的步骤全部放进
+permissive 窗口。
+
+**改动（3 处，全部在 `write_root_script`）**
+
+| 位置 | 改动 |
+| --- | --- |
+| 启动段的 late-load 决策 + `KSU_READY` 门禁 | `SELINUX_FIXUP=0` 时整段跳过，记 `app route: late-load deferred to the end of the run`，`KSU_ALREADY=0` |
+| 栈内 su 探测 | `SELINUX_FIXUP=0` 时不探测 su，写 `/data/local/tmp/.ghostlock_run.sh`（`exec sh -c "$2"`）并把 `$SU` 指向它——栈里既有调用点（`"$SU" -c "..."`）一行不改，只是不再切域 |
+| 栈内「apply modules」的第二次 late-load | `SELINUX_FIXUP=1` 才执行；app 路线跳过，避免在起 daemon/杀 zygote 之前回到 enforcing |
+| 脚本末尾（栈之后） | `SELINUX_FIXUP=0` 时执行唯一一次 late-load，并记 `kernelsu` 是否进 `/proc/modules` |
+| 栈开头 | 已安装的 `/data/adb/ksu/bin/ksud` 不存在时退回 app 包里的 libksud.so，不再直接放弃整段栈 |
+
+app 侧 `AndroidGhostlockRepository` 在发布组件包目录的同时设
+`GHOSTLOCK_SELINUX_FIXUP=0`，即「选了组件包就走 app 路线」。
+
+**验证证据（本机，无真机）**
+
+1. `sh -n` 通过。脚本用「按字符串字面量提取 + 去 C 注释」的抽取器取出
+   （注意 `"$MODDIR"/*.zip` 里的 `/*` 会被朴素的注释剥离吃掉，抽取器必须按字符串状态机扫）。
+2. 把脚本抽出来在主机上整轮跑（stub `ksud` / `znctl` / `setenforce` / `id` / `uname`），
+   `SELINUX_FIXUP=0`，顺序与 D1 一致：
+   `policy reload skipped` → `late-load deferred` → `module install exit=0`（两个包）
+   → `starting zygisk daemon` → `zygisk daemon ready` → `killing zygote64 pid=...`
+   → `zygote patched=1` → `starting Vector daemon` → `LSPosed stack setup done`
+   → `late-load (last step)`。同一次模拟先抓到两个真问题：早期 late-load 未跳过、
+   `$SU` 包装脚本未被 exec（后者是模拟环境缺 `/system/bin/sh` 所致）。
+3. `cmp_disasm.py`（基线 `592` 的 `build/native/ghostlock`，sha256 `215f4ef5…`）：
+   8 个攻击函数全部 `LAYOUT-SHIFT`，指令数与助记符一致，仅注解地址操作数随布局变化
+   （`owner_thread` 69 / `waiter_thread` 892 / `consumer_thread` 177 /
+   `run_main_route_threads` 417 / `do_kernel5_fake_lock_route` 174 / `do_one_write` 126，
+   与基线完全相同）；对照实验：同一份源码不带本次改动重建 → 与基线 byte-identical，
+   说明工具链确定性没问题，差异确实只来自新增的脚本字符串。`MISSING
+   multicast_owner_worker/multicast_waiter_worker` 在基线自比时同样出现，是本目标的
+   工具属性，不是本次回归。
+4. `:app:assembleDebug` 成功；APK 内 `lib/arm64-v8a/libghostlock.so` 含新增字符串。
+
+**待办**：真机门禁（构建 593）由用户手机执行，日志经
+`Download/ghostlock-debug-log/` 导出后回传；判据是 `late-load` 出现在最后且
+LSPosed 管理器显示 Framework 2.2 / API 102。若 zygote 重启时注入不成立
+（此时 kernelsu.ko 尚未加载），才启动 P2。
