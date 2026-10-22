@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-22T17:54:21"
+updated: "2026-10-22T19:36:24"
 ---
 
 <!-- compiled_truth -->
@@ -159,3 +159,9 @@ profile 里的 `recommend_shizuku` 字段全部移除）。
   summary: "app 路线的执行顺序与禁令已定稿，见 [[app-route-decisions]]：P1 顺序（装模块 → post-fs-data → 等 inject_state:1 → Vector daemon → 重启 zygote → 最后 late-load），app 路线禁用 su 与 magic mount stat，P2（late-load 后补 selinux 写）冻结到 P1 被真机判死为止"
   source: brain/app-route-decisions.md
   affects: [temp-root-to-lsposed, porting-blockers]
+
+- time: 2026-10-22T19:36:24
+  kind: evidence
+  summary: "链路在 app 路线上真机跑通（构建 593）：一条龙从 uid 0 到 LSPosed 激活，不再需要 adb。执行顺序为 P1（模块 → post-fs-data → zygisk daemon ready → 杀 zygote → zygote patched=1 → Vector daemon → 最后 late-load）。证据为用户口述，未见日志归档"
+  source: "用户真机结果 2026-10-22"
+  affects: [temp-root-to-lsposed]

@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, blockers, open-questions]
 created: "2026-10-21T03:35:43"
-updated: "2026-10-22T18:14:14"
+updated: "2026-10-22T19:36:24"
 ---
 
 <!-- compiled_truth -->
@@ -153,3 +153,9 @@ updated: "2026-10-22T18:14:14"
   summary: "无 PC 交付通道已通：手机浏览器可直接从隧道 https://essentials-compiler-email-asin.trycloudflare.com/ 下 APK（593 试验版），日志回传走 /upload.html（本机 127.0.0.1:8477 上的 dist-server.py，POST /upload 存到 dist/uploads/）。往返各验证过一次：GET 593 返回 200，POST 一个文件后在 dist/uploads/ 出现"
   source: "本机验证 2026-10-22"
   affects: [app-route-decisions]
+
+- time: 2026-10-22T19:36:24
+  kind: reversal
+  summary: "B9（app 路线在 kernel 域无法 exec）已解除：根因不是「活干得太多」而是顺序，把需要 exec 的步骤放进 permissive 窗口、late-load 挪到最后即可，构建 593 真机激活成功。原「app 路线在修 / 先走 CLI」的处置作废"
+  source: "构建 593 真机结果 2026-10-22"
+  affects: [porting-blockers]
