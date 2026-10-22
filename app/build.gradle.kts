@@ -88,12 +88,19 @@ android {
             kotlin.directories.add(buildInfoSrc.get().asFile.absolutePath)
         }
     }
-    val properties = Properties()
-    runCatching { properties.load(project.rootProject.file("local.properties").inputStream()) }
-    val keystorePath = (properties.getProperty("KEYSTORE_PATH") ?: System.getenv("KEYSTORE_PATH"))?.trim()?.takeIf { it.isNotEmpty() }
-    val keystorePwd = properties.getProperty("KEYSTORE_PASS") ?: System.getenv("KEYSTORE_PASS")
-    val alias = properties.getProperty("KEY_ALIAS") ?: System.getenv("KEY_ALIAS")
-    val pwd = properties.getProperty("KEY_PASSWORD") ?: System.getenv("KEY_PASSWORD")
+    // Signing inputs come from gradle.properties (committed on purpose: this is a
+    // self-use build, and losing the keystore means no update can be installed
+    // over an existing copy). local.properties still works for local overrides.
+    val localProps = Properties()
+    runCatching { localProps.load(project.rootProject.file("local.properties").inputStream()) }
+    fun signingSetting(name: String): String? =
+        (project.findProperty(name) as String?)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: localProps.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: System.getenv(name)?.trim()?.takeIf { it.isNotEmpty() }
+    val keystorePath = signingSetting("KEYSTORE_PATH")
+    val keystorePwd = signingSetting("KEYSTORE_PASS")
+    val alias = signingSetting("KEY_ALIAS")
+    val pwd = signingSetting("KEY_PASSWORD")
     val keystoreFile = keystorePath?.let(::file)?.takeIf { it.isFile && it.length() > 0L }
     if (keystoreFile != null) {
         signingConfigs {

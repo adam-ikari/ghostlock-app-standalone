@@ -15,6 +15,7 @@ __pycache__
 /devices
 target/
 *.jks
+!keystore/ghostlock-release.jks
 *.keystore
 /.codex/
 /src/.codex/config.toml
