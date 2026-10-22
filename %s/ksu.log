@@ -1,0 +1,28 @@
+[*] root script start uid=0 euid=0
+[*] seccomp=Seccomp:	2 Seccomp_filters:	1 
+[*] ksud=/tmp/opencode/sim/bin/ksud
+[*] ksud_file=-rwxrwxr-x 1 gem gem 200 Oct 22 18:07 /tmp/opencode/sim/bin/ksud
+[*] uname=6.1.145-android14-11-gbd17012cc2f7-ab14044926
+[*] iomem cache: cached 2899 bytes
+[*] policy reload skipped (SELINUX_FIXUP=0)
+[*] app route: late-load deferred to the end of the run
+[*] modules dir=/tmp/opencode/sim/modules
+[*] installed ksud missing; using /tmp/opencode/sim/bin/ksud
+[*] app route: running the stack steps directly (no su)
+[*] su=/tmp/opencode/sim/tmp/.ghostlock_run.sh
+timeout: failed to run command ‘/tmp/opencode/sim/tmp/.ghostlock_run.sh’: No such file or directory
+[*] module install step finished
+[*] starting zygisk daemon (post-fs-data)
+/tmp/opencode/sim/script.sh: 237: /tmp/opencode/sim/tmp/.ghostlock_run.sh: not found
+[!] zygisk daemon not ready (no inject_state:1 / zygisk_vector); NOT restarting zygote
+[!] the LSPosed stack stays inactive this run; run it again once the daemon is up
+== zygisk next status ==
+root_status: KernelSU
+inject_state:1
+modules64: zygisk_vector,zygisksu
+zygote_states:1
+[+] LSPosed stack setup done
+[*] late-load (last step of the app route)
+[sim] LATE-LOAD late-load --kmi android14-6.1 --allow-shell
+[*] late-load exit=0
+[!] KernelSU module not loaded

@@ -1,0 +1,9 @@
+== uname -a ==
+6.1.145-android14-11-gbd17012cc2f7-ab14044926
+== /proc/version ==
+Linux version 6.17.13-2-pve (build@proxmox) (gcc (Debian 14.2.0-19) 14.2.0, GNU ld (GNU Binutils for Debian) 2.44) #1 SMP PREEMPT_DYNAMIC PMX 6.17.13-2 (2026-03-13T08:06Z)
+== /proc/cmdline ==
+BOOT_IMAGE=/boot/vmlinuz-6.17.13-2-pve root=/dev/mapper/pve-root ro quiet amd_iommu=on iommu=pt pcie_acs_override=downstream intel_pstate=disable
+== /tmp/opencode/sim/proc-modules.txt ==
+== selinux ==
+Enforcing

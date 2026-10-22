@@ -393,6 +393,13 @@ namespace ghostlock::attack {
              * a magic mount and stat'ing it blocks the script. Re-running the
              * late-load is harmless and is also what mounts su into this
              * namespace, so the loaded case takes the same path. */
+            /* App route (SELINUX_FIXUP=0) differs in *when* the late-load runs:
+             * this root child lives in u:r:kernel:s0 and the late-load puts the
+             * policy back to enforcing, so every later exec (ksud, sh, znctl)
+             * gets EACCES. Everything that needs exec therefore has to happen
+             * while the policy is still permissive, and the late-load moves to
+             * the very end of the script (see below). */
+            "if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
             "if grep -q kernelsu /proc/modules 2>/dev/null; then\n"
             /* kernelsu is in memory but su was never mounted into this
              * namespace (the late-load is what mounts it). Re-run the
@@ -425,6 +432,10 @@ namespace ghostlock::attack {
             "  exit 1\n"
             "fi\n"
             "echo '[+] KernelSU module loaded' >>\"$LOG\"\n"
+            "else\n"
+            "  KSU_ALREADY=0\n"
+            "  echo '[*] app route: late-load deferred to the end of the run' >>\"$LOG\"\n"
+            "fi\n"
             "if [ \"$KSU_ALREADY\" -eq 1 ] && [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
             "  echo \"[*] kernelsu already loaded; restoring enforcing\" >>\"$LOG\"\n"
             "  echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
@@ -463,6 +474,14 @@ namespace ghostlock::attack {
              * on its own, so it can install the modules and read the app's
              * private data dir without any su in the picture. */
             "  KSU_KSUD=/data/adb/ksu/bin/ksud\n"
+            /* The installed ksud only exists after a late-load has run on this
+             * device at least once. Fall back to the packaged binary (it can
+             * still install modules, just not into /data/adb/ksu/bin) instead
+             * of skipping the whole stack. */
+            "  if [ ! -x \"$KSU_KSUD\" ]; then\n"
+            "    chmod 755 \"$KSUD\" 2>/dev/null\n"
+            "    if [ -x \"$KSUD\" ]; then KSU_KSUD=\"$KSUD\"; echo \"[*] installed ksud missing; using $KSU_KSUD\" >>\"$LOG\"; fi\n"
+            "  fi\n"
             /* The late-load above mounts su into this namespace, so the module
              * install can run in the ksu domain (the shell domain cannot
              * write /data/adb/modules_update). */
@@ -477,6 +496,20 @@ namespace ghostlock::attack {
             "    SUOUT=$(timeout 10 \"$cand\" -c 'echo ghostlock-su-ok' 2>&1)\n"
             "    case \"$SUOUT\" in *ghostlock-su-ok*) SU=\"$cand\"; break;; esac\n"
             "  done\n"
+            "  else\n"
+            /* App route: no su at all. su called from u:r:kernel:s0 blocks in
+             * pipe_read and not even `timeout` gets it back (2026-10-22, both
+             * the 10s and the 60s wrapper stalls). Instead of rewriting the
+             * verified block below, point $SU at a wrapper with su's `-c CMD`
+             * shape so every call site keeps working — it just runs the
+             * command in this process instead of switching domains. */
+            "  cat >/data/local/tmp/.ghostlock_run.sh <<'RUNEOF'\n"
+            "#!/system/bin/sh\n"
+            "exec sh -c \"$2\"\n"
+            "RUNEOF\n"
+            "  chmod 755 /data/local/tmp/.ghostlock_run.sh\n"
+            "  SU=/data/local/tmp/.ghostlock_run.sh\n"
+            "  echo '[*] app route: running the stack steps directly (no su)' >>\"$LOG\"\n"
             "  fi\n"
             "  if [ -n \"$SU\" ]; then\n"
             "    echo \"[*] su=$SU\" >>\"$LOG\"\n"
@@ -509,9 +542,14 @@ namespace ghostlock::attack {
              * every domain can reach, so the ksu domain can read them. */
             "    timeout 60 \"$SU\" -c \"sh /data/local/tmp/.ghostlock_modinstall.sh \"$LSPD_MODULES\" \"$KSU_KSUD\"\" >>\"$LOG\" 2>&1\n"
             "    echo '[*] module install step finished' >>\"$LOG\"\n"
+            /* App route: no second late-load here. It re-enforces SELinux, and
+             * the daemon start + zygote restart right below still need exec.
+             * The app route late-loads once, at the very end. */
+            "    if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
             "    echo '[*] late-load (apply modules)' >>\"$LOG\"\n"
             "    timeout 60 \"$SU\" -c \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
             "    echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
+            "    fi\n"
             "    echo '[*] starting zygisk daemon (post-fs-data)' >>\"$LOG\"\n"
             /* post-fs-data needs the logcat/dmesg permissions the KernelSU
              * manager's uid carries, so it runs the ksud from the app package
@@ -601,6 +639,21 @@ namespace ghostlock::attack {
             "  fi\n"
             "else\n"
             "  echo '[*] no LSPosed component packages selected; skipping the stack' >>\"$LOG\"\n"
+            "fi\n"
+            /* App route: the late-load is the last thing that happens. It loads
+             * kernelsu.ko (so `su` works from a normal shell later) but also
+             * re-enforces SELinux, which kills every exec from this domain —
+             * so nothing that needs to run may come after it. */
+            "if [ \"$SELINUX_FIXUP\" = \"0\" ]; then\n"
+            "  echo '[*] late-load (last step of the app route)' >>\"$LOG\"\n"
+            "  chmod 755 \"$KSUD\" 2>/dev/null\n"
+            "  timeout 60 \"$KSUD\" late-load --kmi \"$KMI\" --allow-shell >>\"$LOG\" 2>&1\n"
+            "  echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
+            "  if grep -q kernelsu /proc/modules 2>/dev/null; then\n"
+            "    echo '[+] KernelSU module loaded' >>\"$LOG\"\n"
+            "  else\n"
+            "    echo '[!] KernelSU module not loaded' >>\"$LOG\"\n"
+            "  fi\n"
             "fi\n"
             "else\n"
             "  echo '[!] fixup failed; SELinux left permissive' >>\"$LOG\"\n"

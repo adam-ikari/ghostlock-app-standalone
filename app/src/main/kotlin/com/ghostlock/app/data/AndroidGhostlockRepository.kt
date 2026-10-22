@@ -698,6 +698,12 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                      * the device into recovery. */
                     publishedModules?.let { modulesDir ->
                         environment()["GHOSTLOCK_LSPD_MODULES"] = modulesDir
+                        /* The app process has no su available to its root child
+                         * (it lives in u:r:kernel:s0, where exec of su blocks),
+                         * so the stack runs in the app route order instead: the
+                         * steps that need exec happen while SELinux is still
+                         * permissive and the late-load goes last. */
+                        environment()["GHOSTLOCK_SELINUX_FIXUP"] = "0"
                     }
                 }
             onLog("<b> starting native: ${binary.absolutePath}")
