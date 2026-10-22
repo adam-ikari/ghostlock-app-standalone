@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, device, mediatek]
 created: "2026-10-21T03:34:50"
-updated: "2026-10-21T15:06:39"
+updated: "2026-10-22T08:33:16"
 ---
 
 <!-- compiled_truth -->
@@ -99,4 +99,10 @@ updated: "2026-10-21T15:06:39"
   kind: evidence
   summary: "本机 Shizuku 状态实测：Shizuku 13.6.0.r1086（官方版），ADB 模式 UID 2000，SELinux u:r:shell:s0，perm 已授权、ping 正常 —— 但 UserService 辅助进程在 MediaTek 上必崩（Shizuku#1198）。官方 13.6.0 在本机不可用，需换 thedjchi 分支"
   source: "app 侧 Shizuku 状态 dump（2026-10-21）"
+  affects: [titan2-device]
+
+- time: 2026-10-22T08:33:16
+  kind: evidence
+  summary: "重启后必须先解锁：RUNNING_LOCKED 时 CE 存储没建好，侧载 app 起不来（报 Activity class does not exist）；persist.sys.boot.reason.history 记每次重启的原因与时间戳"
+  source: "dumpsys user + getprop（2026-10-22）"
   affects: [titan2-device]

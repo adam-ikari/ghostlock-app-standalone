@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, blockers, open-questions]
 created: "2026-10-21T03:35:43"
-updated: "2026-10-22T00:38:43"
+updated: "2026-10-22T17:48:21"
 ---
 
 <!-- compiled_truth -->
@@ -129,3 +129,15 @@ updated: "2026-10-22T00:38:43"
   summary: "B8（新增并解除）：v1.2(586) 内置的 native（479cf57）跑一键 root 把设备带进 recovery —— 根因是该版 root 脚本相对真机验证过的手写流程有四处偏离（多一次 late-load、rm -rf 放进循环、没走 su 域、路径没引号），且「等 60 秒再起 Vector daemon」的保护被这些偏离破坏。教训：review-2026-10-21.md 已写明「同步后要重跑门禁」，我跳过门禁就发了版。已修：v1.2(587) 逐条对齐手写流程 + LSPosed 段改为仅在用户选了组件包时才执行"
   source: "真机事故 + 桩环境全流程验证"
   affects: [porting-blockers]
+
+- time: 2026-10-22T08:33:16
+  kind: evidence
+  summary: "设备重启取证：boot reason 是用户态 reboot 系统调用（reboot,userrequested,recovery），pstore 现场 kernel_restart←__arm64_sys_reboot；另有一次真 oops 落在 __secure_computing（MTK BUG 断言）"
+  source: "pstore /sys/fs/pstore/console-ramoops-0 + getprop persist.sys.boot.reason.history（2026-10-22）"
+  affects: [porting-blockers, temp-root-to-lsposed]
+
+- time: 2026-10-22T17:48:21
+  kind: reversal
+  summary: "B9（新增）：app 路线的 root child 落在 u:r:kernel:s0，不是能做事的域。利用把 cred 换成 init_cred 后上下文就是 kernel；enforcing 下 kernel 域连 /system/bin/sh 都 exec 不了（dmesg: exec sh: Permission denied），su 也卡死（脚本阻塞在 pipe_read）。而策略重载 load_policy 与 ksud late-load 都会把 SELinux 从 permissive 拉回 enforcing —— 所以 app 路线在 late-load 之后必然做不完模块安装。对照：su 从 shell 域正常（adb shell su -c id → u:r:ksu:s0），CLI 路线之所以成立就是因为脚本由 adb shell 进程执行并 su 进 ksu 域。之前把 app 路线两次「掉线」归因成内核 oops 是错的：本次 pstore 无 Oops，实际是 [ -x /system/bin/su ] 的 stat 卡在 magic mount 上导致 adb 无响应"
+  source: "dmesg.txt scontext=u:r:kernel:s0（pid 17443/25426）+ files/ghostlock-ksu-1792661397218.log + 宿主 adb shell su 对照；artifacts/2026-10-22-device-dump"
+  affects: [porting-blockers, temp-root-to-lsposed]

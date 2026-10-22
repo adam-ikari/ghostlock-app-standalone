@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-22T05:25:14"
+updated: "2026-10-22T17:48:31"
 ---
 
 <!-- compiled_truth -->
@@ -40,8 +40,10 @@ graph LR
 3. **zygiskd 必须在模块装好之后重启**，否则它扫不到新模块（`Modules: 0`）：
    `znctl stop` → 重新跑 `ksud post-fs-data` → `znctl dump-zn` 就能看到 `modules64:1,...`。
 4. **zygote 要重起一次**才能吃到注入：`ksud soft-reboot` 或杀 zygote 让 init 重拉。
-5. **Vector 的 daemon 别用 `unshare --propagation`**：设备上的 toybox `unshare` 不支持该参数，
-   直接 `cd /data/adb/modules/zygisk_vector && ./daemon &` 即可。
+5. **Vector 的 daemon 必须用绝对路径启动**：daemon 脚本内部用 `dirname` 定位自己，
+   相对路径会让 `-Djava.class.path=daemon.apk` 变成相对路径 → `UnsatisfiedLinkError`
+   → daemon 静默退出（2026-10-22 真机踩到）。设备上的 toybox `unshare` 不支持
+   `--propagation slave`，用 `unshare -m /data/adb/modules/zygisk_vector/daemon`。
 6. **宿主（Windows）下载 GitHub release**：`github.com`/`objects.githubusercontent.com` 不通，
    但 `api.github.com` 与 `release-assets.githubusercontent.com` 通 →
    `https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>` + `Accept: application/octet-stream`。
@@ -54,6 +56,28 @@ graph LR
 - 临时 root 与 late-load 的 KernelSU 都只在**本次开机**有效；重启后回到原点。
 - ZygiskNext / Vector 的模块文件在 `/data/adb/modules/` 里，但 KernelSU 没了就不会被加载。
 - 设备当前是**锁屏有密码**状态（`wm dismiss-keyguard` 无效），要动 manager UI 需要用户解锁。
+- 手机重启后处于 `RUNNING_LOCKED` 时 CE 存储没建好，侧载 app 起不来
+  （报 `Activity class ... does not exist`，看着像 APK 坏了）。**每次重启后先解锁**。
+
+## app 路线（2026-10-22 已落地）
+
+app 自己用 `ProcessBuilder` 拉起 `libghostlock.so` 跑利用，**不再依赖任何外部 helper app**
+（Shizuku 依赖已彻底删除：gradle 依赖、UserService + AIDL、执行入口、UI 开关、
+profile 里的 `recommend_shizuku` 字段全部移除）。
+
+三个必须记住的点：
+
+1. **组件包放 app 的 external files dir**：ksu 域读不了 app 私有目录（`app_data_file`），
+   共享存储任何域可读。每次发布用唯一目录名 `modules-published-<timestamp>`：
+   重装 app 会换 uid，旧目录属主还是旧 uid，写不进去。
+2. **root script 不继承环境变量**（`execl` 执行），路径只能由 `RuntimeConfig` 读环境变量
+   后转义注入脚本正文。
+3. **杀 zygote 有硬前置**：`inject_state:1` 且 `modules64` 含 `zygisk_vector` 才允许杀；
+   不满足就**不杀**（宁可这一轮不激活 LSPosed，也不把设备带进 recovery）。
+
+2026-10-22 真机证据（app 路线）：`policy fixup rc=0` → `late-load exit=0` →
+`[+] KernelSU module loaded` → `[*] modules dir=/storage/emulated/0/Android/data/<pkg>/files/modules-published-<ts>`。
+**利用拿 root 成功、组件包发布成功**；LSPosed 框架激活那一步仍卡在设备掉线（见 [[porting-blockers]]）。
 
 
 ## Timeline
@@ -117,3 +141,15 @@ graph LR
   summary: "app 路线定为不依赖 Shizuku：adb shell 与 Shizuku UserService 是同一执行环境（uid 2000 / shell 域 / 无 seccomp），而 Shizuku 官方 13.6.0 在 MediaTek 上 UserService 必崩（#1198）。app 侧组件包改发布到 external files dir（ksu 域可读，app 私有目录读不到），native root script 用 su 进 ksu 域装模块（shell 域写不了 modules_update），组件包路径由 RuntimeConfig 注入脚本正文（root script 用 execl 执行、不继承环境变量）。另：kernelsu 已加载但 su 未挂进 namespace 时必须补跑 late-load"
   source: "2026-10-22 真机验证"
   affects: [temp-root-to-lsposed, porting-blockers]
+
+- time: 2026-10-22T08:30:28
+  kind: decision
+  summary: "app 路线落地：Shizuku 依赖彻底删除、组件包发布、杀 zygote 硬前置"
+  source: "docs/titan2-shizuku-removal-2026-10-22.md + 真机 ksu 日志"
+  affects: [temp-root-to-lsposed]
+
+- time: 2026-10-22T17:48:31
+  kind: evidence
+  summary: "app 路线执行顺序的硬约束（2026-10-22 真机）：root child = u:r:kernel:s0，只能在 SELinux permissive 窗口内做事；策略重载（load_policy）和 ksud late-load 都会把它推回 enforcing。因此 app 路线要么把「装模块 / post-fs-data / 起 Vector daemon / 重启 zygote」全部放在 late-load 之前（路线 P1），要么在 late-load 之后再补一次 selinux_state 写（路线 P2，属攻击关键路径改动，需计划+cmp_disasm+门禁）。su 不可用：app 路线里 su 从 kernel 域卡死在 pipe_read，从 shell 域正常"
+  source: "docs/titan2-app-route-domain-2026-10-22.md；artifacts/2026-10-22-device-dump"
+  affects: [temp-root-to-lsposed]
