@@ -41,6 +41,9 @@ sealed interface GhostlockEffect {
     data class Toast(val resourceId: Int) : GhostlockEffect
     data class Clipboard(val text: String) : GhostlockEffect
     data class KeepScreenAwake(val enabled: Boolean) : GhostlockEffect
+
+    /** Hand a downloaded APK to the system package installer. */
+    data class InstallApk(val path: String) : GhostlockEffect
 }
 
 private const val OverwriteSummaryLimit = 12
@@ -848,28 +851,79 @@ class GhostlockViewModel(
      */
     fun onPickModuleZip() = send(GhostlockEffect.PickDocument(DocumentRequest.ModuleZip))
 
+    /** True while the download-proxy input dialog owns the confirm button. */
+    private var mirrorInputPending = false
+
     /**
-     * Fetches the component packages from their upstream releases.
+     * Sets the reverse-proxy prefix used for component downloads.
+     *
+     * Upstream lives on GitHub, which is slow or unreachable on some networks;
+     * a proxy prefix routes both the update.json and the zip through it. The
+     * proxy sees and can replace the package, and these packages are installed
+     * as root — hence the warning in the hint, and the https-only rule in
+     * ComponentFetcher.
+     */
+    /**
+     * Fetches the KernelSU manager APK and opens the package installer.
+     *
+     * No root is involved on purpose: installing an app is the user's decision,
+     * and a root-held `pm install` would install silently behind their back.
+     * Without the manager there is no `libksud.so` to late-load, so this is the
+     * one component that has to end up as a real installed app.
+     */
+    fun onFetchKernelSuManager() {
+        viewModelScope.launch(Dispatchers.IO) {
+            appendLog("KernelSU manager: fetching from the upstream release")
+            val path = runCatching { repository.fetchKernelSuManager { appendLog(it) } }
+                .getOrElse { error ->
+                    appendLog("KernelSU manager: ${error.message}")
+                    null
+                }
+            if (path == null) {
+                appendLog("KernelSU manager: failed (see the lines above)")
+            } else {
+                send(GhostlockEffect.InstallApk(path))
+            }
+        }
+    }
+
+    fun onSetDownloadMirror() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = runCatching { repository.downloadMirror() }.getOrDefault("")
+            withContext(Dispatchers.Main) {
+                mirrorInputPending = true
+                mutableState.update {
+                    it.copy(
+                        dialogVisible = true,
+                        dialogType = DialogType.INPUT,
+                        dialogTitleRes = R.string.download_mirror_title,
+                        dialogMessageRes = R.string.download_mirror_hint,
+                        dialogInput = current,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Fetches one component package from the release its author publishes.
      *
      * ZygiskNext cannot be bundled (all rights reserved since v4-0.9.2, "no
-     * redistribution"), so the app downloads the release the author publishes
-     * instead of carrying it. After this succeeds the run needs no further
-     * setup besides tapping 执行.
+     * redistribution"), so the app downloads it instead of carrying it. Vector
+     * is fetched the same way so both buttons behave identically; a package
+     * that is already staged is skipped rather than replaced.
      */
-    fun onFetchModuleZips() {
+    fun onFetchModulePackage(key: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            appendLog("component packages: fetching from upstream releases")
-            val failed = runCatching { repository.fetchModulePackages { appendLog(it) } }
+            appendLog("component package '$key': fetching from upstream release")
+            val ok = runCatching { repository.fetchModulePackage(key) { appendLog(it) } }
                 .getOrElse { error ->
-                    appendLog("component packages: ${error.message}")
-                    listOf("all")
+                    appendLog("component package '$key': ${error.message}")
+                    false
                 }
             appendLog(
-                if (failed.isEmpty()) {
-                    "component packages: ready — pick nothing, just run"
-                } else {
-                    "component packages: failed ${failed.joinToString()}"
-                },
+                if (ok) "component package '$key': ready — pick nothing, just run"
+                else "component package '$key': failed (see the lines above)",
             )
         }
     }
@@ -1052,15 +1106,38 @@ class GhostlockViewModel(
     fun onDialogConfirm(value: String) {
         val dialogType = state.value.dialogType
         val renameTarget = state.value.userProfileRenameTarget
+        val mirrorPending = mirrorInputPending
+        mirrorInputPending = false
         dismissDialog(clearConfirmation = false)
         when {
             renameTarget != null -> renameUserProfile(renameTarget, value)
+            mirrorPending -> saveDownloadMirror(value)
             dialogType == DialogType.INPUT -> parseUrl(value)
             else -> Unit
         }
     }
 
-    fun onDialogDismiss() = dismissDialog()
+    fun onDialogDismiss() {
+        mirrorInputPending = false
+        dismissDialog()
+    }
+
+    private fun saveDownloadMirror(value: String) {
+        val prefix = value.trim()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { repository.setDownloadMirror(prefix) }
+                .onSuccess {
+                    appendLog(
+                        if (prefix.isEmpty()) {
+                            "downloads: direct (no proxy)"
+                        } else {
+                            "downloads: via proxy $prefix"
+                        },
+                    )
+                }
+                .onFailure { appendLog("downloads: cannot save proxy (${it.message})") }
+        }
+    }
 
     fun onDialogDismissFinished() {
         if (!state.value.dialogVisible) {

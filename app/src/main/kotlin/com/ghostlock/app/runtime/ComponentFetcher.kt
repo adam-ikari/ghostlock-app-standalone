@@ -22,26 +22,47 @@ import java.util.zip.ZipFile
  */
 object ComponentFetcher {
     data class Component(
+        /** Stable id used by the UI/repository; see [DefaultKeys]. */
+        val key: String,
         val label: String,
         val updateUrl: String,
         val moduleId: String,
         val fileName: String,
     )
 
+    const val ZygiskNextKey = "zygisknext"
+    const val VectorKey = "vector"
+
     val Defaults = listOf(
         Component(
+            key = ZygiskNextKey,
             label = "ZygiskNext",
             updateUrl = "https://lsposed.zip/zygisk-next/update.json",
             moduleId = "zygisksu",
             fileName = "zygisknext.zip",
         ),
         Component(
+            key = VectorKey,
             label = "Vector",
             updateUrl = "https://raw.githubusercontent.com/JingMatrix/Vector/master/zygisk/update.json",
             moduleId = "zygisk_vector",
             fileName = "vector.zip",
         ),
     )
+
+    /** The component the UI asked for, or null for an unknown key. */
+    fun byKey(key: String): Component? = Defaults.firstOrNull { it.key == key }
+
+    /**
+     * KernelSU's manager is the one component that must exist as an *installed
+     * app*: the root script pulls `libksud.so` out of its APK. Its releases
+     * publish a plain APK asset, so the newest `-release.apk` is the file to
+     * hand to the package installer.
+     */
+    const val KernelSuReleasesUrl = "https://api.github.com/repos/tiann/KernelSU/releases/latest"
+
+    /** A manager APK is ~14 MB; anything under 1 MB is a truncated body. */
+    private const val MinApkBytes = 1_000_000L
 
     /** A 2 KB "zip" is an error page or a redirect body, not a module. */
     private const val MinZipBytes = 100_000L
@@ -52,6 +73,26 @@ object ComponentFetcher {
     private const val ConnectTimeoutMs = 15_000
     private const val ReadTimeoutMs = 60_000
 
+    /**
+     * Rewrites [url] through a reverse proxy so a slow or blocked upstream
+     * still delivers.
+     *
+     * Two conventions are accepted, because the public accelerators differ:
+     *   - prefix style: `https://mirror.example/` + url
+     *     -> `https://mirror.example/https://github.com/...`
+     *   - placeholder style: `https://mirror.example/mirror?u={url}`
+     *
+     * An empty prefix means "go straight to the upstream". A prefix that is not
+     * an https URL is ignored rather than silently downgrading to http.
+     */
+    fun withMirror(url: String, mirrorPrefix: String): String {
+        val prefix = mirrorPrefix.trim()
+        if (prefix.isEmpty()) return url
+        if (!prefix.startsWith("https://")) return url
+        if (prefix.contains("{url}")) return prefix.replace("{url}", url)
+        return prefix.trimEnd('/') + "/" + url
+    }
+
     /** The `zipUrl` field of an `update.json`, or null when absent/not https. */
     fun parseZipUrl(json: String): String? =
         Regex("\"zipUrl\"\\s*:\\s*\"([^\"]+)\"")
@@ -59,6 +100,73 @@ object ComponentFetcher {
             ?.groupValues
             ?.get(1)
             ?.takeIf { it.startsWith("https://") }
+
+    /**
+     * The `-release.apk` asset of a GitHub releases API response, or the first
+     * APK asset when the naming changes. Null when the release carries none.
+     */
+    fun parseManagerApkUrl(json: String): String? {
+        val urls = Regex("\"browser_download_url\"\\s*:\\s*\"(https://[^\"]+\\.apk)\"")
+            .findAll(json)
+            .map { it.groupValues[1] }
+            .toList()
+        return urls.firstOrNull { it.contains("-release.apk") } ?: urls.firstOrNull()
+    }
+
+    /**
+     * True when [apk] looks like a real package: big enough, and a zip that
+     * carries a manifest plus code. Blocks truncated downloads and HTML error
+     * pages from reaching the system installer.
+     */
+    fun verifyManagerApk(apk: File): Boolean {
+        if (!apk.isFile || apk.length() < MinApkBytes) return false
+        return runCatching {
+            ZipFile(apk).use { archive ->
+                archive.getEntry("AndroidManifest.xml") != null &&
+                    archive.getEntry("classes.dex") != null
+            }
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Downloads the KernelSU manager APK into `<cacheDir>/component-apk` and
+     * returns it, or null when the lookup/download/verify failed.
+     */
+    fun fetchManagerApk(context: Context, mirrorPrefix: String, onLog: (String) -> Unit): File? {
+        val releases = runCatching { httpGetText(withMirror(KernelSuReleasesUrl, mirrorPrefix)) }
+            .getOrElse {
+                onLog("KernelSU: release lookup failed (${it.message})")
+                return null
+            }
+        val apkUrl = parseManagerApkUrl(releases)
+        if (apkUrl == null) {
+            onLog("KernelSU: latest release has no APK asset")
+            return null
+        }
+        val dir = File(context.cacheDir, "component-apk")
+        if (!dir.isDirectory && !dir.mkdirs()) {
+            onLog("KernelSU: cannot create ${dir.absolutePath}")
+            return null
+        }
+        val dest = File(dir, "kernelsu-manager.apk")
+        val tmp = File(dir, "kernelsu-manager.apk.part")
+        onLog("KernelSU: downloading ${apkUrl.substringAfterLast('/')}")
+        return try {
+            download(withMirror(apkUrl, mirrorPrefix), tmp)
+            if (!verifyManagerApk(tmp)) {
+                onLog("KernelSU: rejected download (${tmp.length()} bytes, not a package)")
+                return null
+            }
+            if (!tmp.renameTo(dest)) tmp.copyTo(dest, overwrite = true)
+            onLog("KernelSU manager ready: ${dest.length()} bytes")
+            dest
+        } catch (error: IOException) {
+            onLog("KernelSU: download failed (${error.message})")
+            null
+        } finally {
+            if (tmp.exists()) tmp.delete()
+        }
+    }
 
     /** `id=` out of the module.prop inside [zip], or null when unreadable. */
     fun moduleIdOf(zip: File): String? = runCatching {
@@ -99,7 +207,12 @@ object ComponentFetcher {
      * replaced after the download verifies, so a failed fetch never destroys a
      * working copy from an earlier run.
      */
-    fun fetch(context: Context, component: Component, onLog: (String) -> Unit): Boolean {
+    fun fetch(
+        context: Context,
+        component: Component,
+        mirrorPrefix: String,
+        onLog: (String) -> Unit,
+    ): Boolean {
         val dir = File(context.filesDir, "modules")
         if (!dir.isDirectory && !dir.mkdirs()) {
             onLog("${component.label}: cannot create ${dir.absolutePath}")
@@ -114,7 +227,7 @@ object ComponentFetcher {
             onLog("${component.label}: already staged (${existing.name}), skipped")
             return true
         }
-        val update = runCatching { httpGetText(component.updateUrl) }.getOrElse {
+        val update = runCatching { httpGetText(withMirror(component.updateUrl, mirrorPrefix)) }.getOrElse {
             onLog("${component.label}: update.json failed (${it.message})")
             return false
         }
@@ -123,10 +236,12 @@ object ComponentFetcher {
             onLog("${component.label}: update.json has no usable zipUrl")
             return false
         }
-        onLog("${component.label}: downloading ${zipUrl.substringAfterLast('/')}")
+        val source = withMirror(zipUrl, mirrorPrefix)
+        onLog("${component.label}: downloading ${zipUrl.substringAfterLast('/')}" +
+            if (source == zipUrl) "" else " via ${source.substringBefore("/https://")}")
         val tmp = File(dir, component.fileName + ".part")
         try {
-            download(zipUrl, tmp)
+            download(source, tmp)
             val version = verifyZip(tmp, component.moduleId)
             if (version == null) {
                 onLog("${component.label}: rejected download (not module ${component.moduleId}, " +

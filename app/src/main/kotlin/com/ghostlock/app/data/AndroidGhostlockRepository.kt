@@ -49,6 +49,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val DefaultDebugLocation = "Download/ghostlock-debug-log"
         const val PrefForceAttackTest = "force_attack_test"
         const val PrefDebugExportEnabled = "debug_export_enabled"
+        const val KEY_DOWNLOAD_MIRROR = "download_mirror"
         const val PrefDebugExportLocation = "debug_export_location"
         const val PrefDebugKernelLogEnabled = "debug_kernel_log_enabled"
         const val PrefDebugProfileOverrides = "debug_profile_overrides"
@@ -745,25 +746,46 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         return cacheDocument(uri, "$LspdStackDirectory/$name")
     }
 
-    /**
-     * Downloads ZygiskNext / Vector from their upstream releases.
-     *
-     * Each package is verified (module.prop id + size) before it replaces the
-     * copy on disk, so a failed download leaves a previously working package
-     * untouched. Returned labels are the ones that failed.
-     */
-    override suspend fun fetchModulePackages(onLog: (String) -> Unit): List<String> =
+    override suspend fun fetchKernelSuManager(onLog: (String) -> Unit): String? =
         withContext(Dispatchers.IO) {
-            val failed = mutableListOf<String>()
-            for (component in ComponentFetcher.Defaults) {
-                val ok = runCatching { ComponentFetcher.fetch(appContext, component, onLog) }
-                    .getOrElse { error ->
-                        onLog("${component.label}: fetch failed (${error.message})")
-                        false
-                    }
-                if (!ok) failed += component.label
+            runCatching { ComponentFetcher.fetchManagerApk(appContext, downloadMirror(), onLog) }
+                .getOrElse { error ->
+                    onLog("KernelSU: fetch failed (${error.message})")
+                    null
+                }
+                ?.absolutePath
+        }
+
+    /** Reverse-proxy prefix used for component downloads; empty means direct. */
+    override fun downloadMirror(): String =
+        appContext.getSharedPreferences("ghostlock_prefs", Context.MODE_PRIVATE)
+            .getString(KEY_DOWNLOAD_MIRROR, null)
+            .orEmpty()
+
+    override fun setDownloadMirror(prefix: String) {
+        appContext.getSharedPreferences("ghostlock_prefs", Context.MODE_PRIVATE)
+            .edit { putString(KEY_DOWNLOAD_MIRROR, prefix.trim()) }
+    }
+
+    /**
+     * Downloads one component package from its upstream release.
+     *
+     * The package is verified (module.prop id + size) before it replaces the
+     * copy on disk, so a failed download leaves a previously working package
+     * untouched.
+     */
+    override suspend fun fetchModulePackage(key: String, onLog: (String) -> Unit): Boolean =
+        withContext(Dispatchers.IO) {
+            val component = ComponentFetcher.byKey(key)
+            if (component == null) {
+                onLog("component packages: unknown component '$key'")
+                return@withContext false
             }
-            failed
+            runCatching { ComponentFetcher.fetch(appContext, component, downloadMirror(), onLog) }
+                .getOrElse { error ->
+                    onLog("${component.label}: fetch failed (${error.message})")
+                    false
+                }
         }
 
     override suspend fun cacheDocument(uri: String, fileName: String): String {

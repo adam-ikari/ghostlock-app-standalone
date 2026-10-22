@@ -67,3 +67,74 @@ https://raw.githubusercontent.com/JingMatrix/Vector/master/zygisk/update.json
 
 - 没做下载进度条（22 MB 的 debug 包网络慢时只有一个日志行）。
 - 没做「检查更新」（同一套 `update.json` 可以支持，但当前没有需求）。
+
+## KernelSU 管理器：下载归 app，安装归系统安装器（2026-10-22 追加，含一次撤销）
+
+> **撤销（2026-10-22，同日）**：下面第一版做法是「拿到 root 后脚本 `pm install` 静默安装」，
+> 已作废。理由：静默安装必须依赖 root，而这套流程的 root 正是它要服务的东西——一旦利用失败，
+> 管理器也装不上；更关键的是「root 在后台悄悄装 app」本身不该是默认行为，安装 app 是用户的决定。
+> 现行做法回到 597e：app 下载，弹系统安装器，用户确认一次。`ops.cpp` 已 `git checkout` 回到 HEAD，
+> 攻击路径不再有任何改动，也就不再需要 cmp_disasm 与真机门禁。作废代码：`pm install` 段、
+> 签名不一致时 `pm uninstall` 重试、脚本缓冲区 12288→16384、`GHOSTLOCK_HOME` 取件路径、
+> `InstallApk` effect 删除。以下原文保留作记录。
+
+### 原方案（已作废）
+
+#### 为什么单独处理
+
+### 为什么单独处理
+
+三个组件里只有管理器必须变成「已安装的 app」：root 脚本从
+`/data/app/**/lib/arm64/libksud.so` 取 ksud，`late-load` 没有它就无从谈起。
+另外两个是 zip，进 `files/modules/` 即可。
+
+#### 取件
+
+- 上游：`https://api.github.com/repos/tiann/KernelSU/releases/latest`，
+  取资产里的 `-release.apk`（`parseManagerApkUrl`），当前 v3.3.1 / 13,637,206 B
+- 校验：`verifyManagerApk` 要求 ≥1 MB 且 zip 内有 `AndroidManifest.xml` + `classes.dex`
+- 落盘：`filesDir/component-apk/kernelsu-manager.apk`
+  （不是 cacheDir：root 脚本按 `$HOME_DIR` 找它，缓存可能被系统清掉）
+
+#### 安装（已作废的 `src/core/attack/ops.cpp` 段）
+
+在 KSUD 扫描之后、模块安装之前插入一段，仅在「找不到任何 libksud.so」时执行：
+
+```sh
+KSU_APK="$HOME_DIR/component-apk/kernelsu-manager.apk"
+if [ ! -x "$KSUD" ] && [ -f "$KSU_APK" ]; then
+  PM=/system/bin/pm; [ -x "$PM" ] || PM=pm
+  timeout 90 "$PM" install -r "$KSU_APK" >>"$LOG" 2>&1
+  # 重新按五个包名扫 libksud.so，再退回 /data/adb/ksu/bin/ksud
+fi
+```
+
+- 已装管理器的设备整段跳过，行为与改动前一致
+- `timeout 90` 防止包管理服务卡住吃掉唯一的 permissive 窗口
+- 脚本缓冲区从 12288 提到 16384：实测新脚本 12128 字节，距旧上限只剩 160 字节，
+  路径再长一点就会触发 `root script too long`
+
+#### 验证（针对已作废的静默安装）
+
+- 分支桩测（主机，`pm` 用桩替换，记录参数）：无管理器 → 记录
+  `pm-called: install -r <staged>` 且 `pm install exit=0`；已装管理器 → 整段不执行、log 不产生
+- 脚本 `sh -n` 通过（按 `snprintf` 字面量还原出 12128 字节）
+- `cmp_disasm` 对 HEAD 重建的基线：7 个函数全为 LAYOUT-SHIFT，
+  指令数/助记符一致，只有地址操作数注解差异；`MISSING multicast_*` 在基线自比时同样出现（工具属性）。
+  全量指令数 37354 → 37352，差异不在被比对的函数内
+- 单测 99 条全绿（新增 3 条：资产挑选、无 APK 返回 null、manifest/dex/过小/非 zip 四拒）
+- **真机门禁未做**：改的是攻击脚本，按规范需要一次冷机跑。
+  本次改动在已有管理器的设备上整段跳过，风险面为零；首次装机路径仍需真机确认
+
+#### 未做
+
+- 静默安装失败时（签名冲突、包管理拒绝）只写日志，没有面向用户的结论行
+- 新装的管理器不会被自动打开，用户要自己点图标进去看模块
+
+### 现行做法（597h）
+
+- 取件同前，落盘回到 `cacheDir/component-apk/kernelsu-manager.apk`
+- `verifyManagerApk` 不变（≥1 MB 且 zip 内有 manifest + classes.dex）
+- 下载完发 `GhostlockEffect.InstallApk`，`MainActivity` 用 `FileProvider` 的 content URI
+  + `ACTION_VIEW` + `application/vnd.android.package-archive` 打开系统安装器
+- 签名不一致时由系统安装器自己报错（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`），app 不替用户卸载任何东西

@@ -10,7 +10,7 @@
     <string name="about_project">Project</string>
     <string name="about_source_code">Source code</string>
     <string name="about_origins">Project origins</string>
-    <string name="about_open_source">Open source licenses</string>
+    <string name="about_open_source">Licenses</string>
     <string name="opensource_info">Copyright © 2026 YuKongA</string>
     <string name="action_import_offsets_conf">Import offsets.conf (v2)</string>
     <string name="action_import_offsets_json">Import offsets.json (v1)</string>
@@ -88,8 +88,18 @@
     <string name="cpu_pair_label">CPU cores</string>
     <string name="module_zips_label">LSPosed module packages</string>
     <string name="module_zips_summary">Pick the official ZygiskNext / Vector zips to install; they are not bundled (ZygiskNext forbids redistribution)</string>
-    <string name="module_zips_fetch_label">Fetch module packages</string>
-    <string name="module_zips_fetch_summary">Download both packages from their upstream releases (needs network)</string>
+    <string name="module_zips_fetch_zygisknext_label">Fetch ZygiskNext</string>
+    <string name="module_zips_fetch_zygisknext_summary">Download the upstream release (its licence forbids bundling it)</string>
+    <string name="module_zips_fetch_vector_label">Fetch Vector</string>
+    <string name="module_zips_fetch_vector_summary">Download the upstream release (GPL-3.0); the manager APK ships inside</string>
+    <string name="module_fetch_kernelsu_label">Fetch KernelSU manager</string>
+    <string name="module_fetch_kernelsu_summary">Downloads the upstream APK and opens the installer; the root script takes libksud.so out of it</string>
+    <string name="module_fetch_kernelsu_missing">Downloaded APK is gone</string>
+    <string name="module_fetch_kernelsu_no_installer">No package installer accepted the APK</string>
+    <string name="download_mirror_label">Download proxy</string>
+    <string name="download_mirror_summary">Empty = straight upstream. Accepts "https://mirror/" or "https://mirror/?u={url}". A proxy can see and replace the zip, and these packages are installed as root — use one you trust</string>
+    <string name="download_mirror_title">Download proxy prefix</string>
+    <string name="download_mirror_hint">https://…/ 或 https://…/?u={url}</string>
     <string name="safe_mode_label">Safe mode</string>
     <string name="safe_mode_summary">Disable all modules</string>
     <string name="force_attack_test_label">Force attack test</string>

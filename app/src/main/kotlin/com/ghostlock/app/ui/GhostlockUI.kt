@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import com.ghostlock.app.runtime.ComponentFetcher
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -197,7 +198,9 @@ interface GhostlockActions {
     fun onSafeModeChanged(enabled: Boolean)
     fun onForceAttackTestChanged(enabled: Boolean)
     fun onPickModuleZip()
-    fun onFetchModuleZips()
+    fun onFetchModulePackage(key: String)
+    fun onSetDownloadMirror()
+    fun onFetchKernelSuManager()
 
     fun onOpenManagerPicker()
     fun onCloseManagerPicker()
@@ -849,9 +852,24 @@ private fun ControlPanel(
                 )
             }
             ArrowPreference(
-                title = stringResource(R.string.module_zips_fetch_label),
-                summary = stringResource(R.string.module_zips_fetch_summary),
-                onClick = actions::onFetchModuleZips,
+                title = stringResource(R.string.module_zips_fetch_zygisknext_label),
+                summary = stringResource(R.string.module_zips_fetch_zygisknext_summary),
+                onClick = { actions.onFetchModulePackage(ComponentFetcher.ZygiskNextKey) },
+            )
+            ArrowPreference(
+                title = stringResource(R.string.module_zips_fetch_vector_label),
+                summary = stringResource(R.string.module_zips_fetch_vector_summary),
+                onClick = { actions.onFetchModulePackage(ComponentFetcher.VectorKey) },
+            )
+            ArrowPreference(
+                title = stringResource(R.string.module_fetch_kernelsu_label),
+                summary = stringResource(R.string.module_fetch_kernelsu_summary),
+                onClick = actions::onFetchKernelSuManager,
+            )
+            ArrowPreference(
+                title = stringResource(R.string.download_mirror_label),
+                summary = stringResource(R.string.download_mirror_summary),
+                onClick = actions::onSetDownloadMirror,
             )
             ArrowPreference(
                 title = stringResource(R.string.module_zips_label),

@@ -66,13 +66,31 @@ interface GhostlockRepository {
         cacheDocument(uri, name)
 
     /**
-     * Downloads both component packages from the releases their authors publish
-     * into the module staging directory. Returns the labels that failed.
+     * Downloads one component package (see `ComponentFetcher.byKey`) from the
+     * release its author publishes into the module staging directory.
      *
-     * Fetching is not redistribution: the bytes come from the rights holder to
-     * the user's own device.
+     * Fetching is not redistribution: the bytes go from the rights holder to the
+     * user's own device. A package that is already staged is left alone, so a
+     * second tap never replaces a version that works.
      */
-    suspend fun fetchModulePackages(onLog: (String) -> Unit): List<String>
+    suspend fun fetchModulePackage(key: String, onLog: (String) -> Unit): Boolean
+
+    /**
+     * Reverse-proxy prefix for component downloads, empty when downloads go
+     * straight upstream. Public accelerators take either `https://mirror/` (the
+     * url is appended) or `https://mirror/?u={url}`.
+     */
+    /**
+     * Downloads the KernelSU manager APK into the app cache and returns its
+     * path, or null when it could not be fetched and verified. The UI hands the
+     * path to the package installer: the manager is the one component that must
+     * be an installed app, because the root script loads `libksud.so` from it.
+     */
+    suspend fun fetchKernelSuManager(onLog: (String) -> Unit): String?
+
+    fun downloadMirror(): String
+
+    fun setDownloadMirror(prefix: String)
 
     suspend fun publishOffsets(candidate: OffsetCandidate): String
 
