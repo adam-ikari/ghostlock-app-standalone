@@ -51,8 +51,17 @@ KSU_KMI=android14-6.1
 sh_() { "$ADB" shell "$@"; }
 # su 域执行：模块安装必须走 su（root 脚本所在域写不了 /data/adb/modules_update）。
 su_() { "$ADB" shell "su -c '$*'"; }
+# 带超时的 su：KernelSU 刚 late-load 之后，su helper 可能阻塞等 service 稳定，
+# 挂住的调用会拖死整个流程（2026-10-22 真机踩到）。
+su_t() { "$ADB" shell "su -c 'timeout 30 $*'"; }
 
 echo "=== 前置检查 ==="
+cat <<'WARN'
+!! 这个脚本会**杀 zygote64**（让 ZygiskNext 注入新 zygote）。
+!! 反复执行会反复杀 zygote，framework 起不来 → rescue party → 进 recovery
+!! （recovery 里 adbd 关着，只能长按电源键）。
+!! 一次跑完即可；中途失败请重启手机再来，不要重复执行。
+WARN
 ROOT_UID=$(sh_ "su -c id -u" 2>/dev/null | tr -d '\r')
 if [ "$ROOT_UID" != "0" ]; then
   echo "!! 当前没有 root（su -c id -u = '$ROOT_UID'）" >&2
@@ -74,22 +83,22 @@ done
 
 echo "=== ① 装模块（su 域；先删旧目录）==="
 # 旧目录残留会让 ksud module install 报 "i/o error: No such file or directory"。
-su_ "rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu"
+su_t "rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu"
 for z in zygisknext.zip vector.zip; do
   echo "  安装 $z"
-  su_ "$KSU_KSUD module install $DEV_MODULES/$z"
+  su_t "$KSU_KSUD module install $DEV_MODULES/$z"
 done
 
 echo "=== 检查 disable 标记（坑 3）==="
 for m in zygisksu zygisk_vector; do
-  if su_ "test -f /data/adb/modules/$m/disable" 2>/dev/null | grep -q .; then
+  if su_t "test -f /data/adb/modules/$m/disable" 2>/dev/null | grep -q .; then
     echo "  移除 $m 的 disable 标记"
-    su_ "rm -f /data/adb/modules/$m/disable"
+    su_t "rm -f /data/adb/modules/$m/disable"
   fi
 done
 
 echo "=== ② late-load（apply 模块 + 跑 post-fs-data）==="
-su_ "$KSU_KSUD late-load --kmi $KSU_KMI --allow-shell"
+su_t "$KSU_KSUD late-load --kmi $KSU_KMI --allow-shell"
 sleep 8
 
 echo "=== ③ 重启 zygote（让 ZygiskNext 注入新 zygote）==="
@@ -105,7 +114,7 @@ fi
 echo "  等 zygote 挂上（最多 90s）==="
 ZGONE=0
 for i in $(seq 1 90); do
-  OUT=$(su_ "$ZNCTL status" 2>/dev/null | tr -d '\r')
+  OUT=$(su_t "$ZNCTL status" 2>/dev/null | tr -d '\r')
   if echo "$OUT" | grep -q 'zygote_states:1'; then
     ZGONE=1
     echo "  zygote 已挂上（${i}s）"
@@ -119,7 +128,7 @@ if [ "$ZGONE" != "1" ]; then
   exit 1
 fi
 # Vector 的 zygisk 模块也要在模块列表里（modules64:1,zygisk_vector）
-MODS=$(su_ "$ZNCTL status" 2>/dev/null | tr -d '\r' | grep '^modules64:' | head -1)
+MODS=$(su_t "$ZNCTL status" 2>/dev/null | tr -d '\r' | grep '^modules64:' | head -1)
 echo "  $MODS"
 if ! echo "$MODS" | grep -q 'zygisk_vector'; then
   echo "!! zygisk 模块没进列表（$MODS），Vector daemon 起不来" >&2
@@ -134,14 +143,14 @@ sleep 60
 echo "=== ⑤ 起 Vector daemon（绝对路径，坑 1）==="
 # 必须绝对路径：daemon 脚本用 ${0%/*} 定位自己，相对路径会让
 # -Djava.class.path=daemon.apk 变成相对路径 → UnsatisfiedLinkError → 静默退出。
-su_ "unshare -m $VECTOR_DIR/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &"
+su_t "unshare -m $VECTOR_DIR/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &"
 # toybox 的 unshare 不支持 --propagation slave（Vector 自带 service.sh 用的就是它），
 # 退化成 -m 即可（坑 2）。
 sleep 20
 
 echo "=== 验证 ==="
-su_ "$VECTOR_DIR/cli status" || true
-su_ "$ZNCTL status" | head -12 || true
+su_t "$VECTOR_DIR/cli status" || true
+su_t "$ZNCTL status" | head -12 || true
 
 cat <<'EOF'
 

@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-22T00:38:59"
+updated: "2026-10-22T03:31:57"
 ---
 
 <!-- compiled_truth -->
@@ -105,3 +105,9 @@ graph LR
   summary: "adb shell 与 Shizuku UserService 执行环境等价（uid 2000 / u:r:shell:s0 / 无 seccomp），native 里有 'no app seccomp filter (adb/shell flow); skipping W3' 的对应分支。因此利用阶段不需要 Shizuku：scripts/run-exploit.sh（adb 跑利用）+ scripts/start-lsposed.sh（root 后用 root 权限跑脚本装模块起 LSPosed）。Shizuku 在本机（MediaTek）反而是坏的（#1198）"
   source: "native 源码 + 真机验证路线"
   affects: [temp-root-to-lsposed]
+
+- time: 2026-10-22T03:31:57
+  kind: evidence
+  summary: "2026-10-22 真机全链路验证通过：利用一次命中拿 root（tcp route calls=1 success=1）→ KernelSU late-load → 装 ZygiskNext+Vector → 杀 zygote64 让 ZygiskNext injector 接管（inject zygote succeed，新 zygote 带 -Xzygote）→ zygote_states:1 / modules64:1,zygisk_vector → Vector daemon 起来 → cli status 报 Framework 2.2 / API 102 / Enabled Modules 12。adb shell 与 Shizuku UserService 执行环境等价（uid 2000 / shell 域 / 无 seccomp），故 LSPosed 栈改走 adb 路线，手机不必装 Shizuku"
+  source: "真机验证（Titan 2 / Android 16 / MediaTek）"
+  affects: [temp-root-to-lsposed, porting-blockers]
