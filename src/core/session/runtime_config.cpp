@@ -101,6 +101,10 @@ static void runtime_config_init_paths(config::RuntimeConfig *config) {
         }
         config->lspd_modules_path = std::move(escaped);
     }
+
+    /* "0" keeps SELinux permissive (no policy reload) for this run. */
+    const char *selinux_fixup = getenv("GHOSTLOCK_SELINUX_FIXUP");
+    if (selinux_fixup && selinux_fixup[0] == '0') config->selinux_fixup = 0;
 }
 
 /* Capture all process environment and CPU/path choices exactly once. Input:

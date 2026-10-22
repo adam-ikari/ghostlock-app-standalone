@@ -223,25 +223,46 @@ namespace ghostlock::session::victim {
         return 1;
     }
 
-    int32_t verify_seccomp_probe_stage(void *context) {
-        auto *stage = static_cast<struct w2_stage_context *>(context);
-        if (write(stage->pipes.cmd_write.get(), "F", 1) != 1) return 0;
+    /* SIGSYS (0xfffffffd) = the filter killed the probe; EPERM/ENOSYS = the
+     * filter's RET_ERRNO actions. With init_cred + permissive SELinux a real
+     * probe fails with a normal errno instead. */
+    static bool seccomp_probe_blocked(uint32_t code) {
+        return code == 0xfffffffd || code == 0xfffffffe || code == 0xffffffff ||
+               code == 1 || code == 38;
+    }
 
+    /* Runs the child's forked finit_module probe and returns the raw errno
+     * code, or 0xffffffff when the probe could not be run at all. */
+    static uint32_t run_seccomp_finit_probe(struct w2_stage_context *stage) {
+        if (write(stage->pipes.cmd_write.get(), "F", 1) != 1) return 0xffffffff;
         uint32_t code = 0;
         if (read(stage->pipes.uid_read.get(), &code, sizeof(code)) !=
             static_cast<ssize_t>(sizeof(code))) {
-            return 0;
+            return 0xffffffff;
         }
+        return code;
+    }
+
+    int32_t verify_seccomp_probe_stage(void *context) {
+        auto *stage = static_cast<struct w2_stage_context *>(context);
+        const uint32_t code = run_seccomp_finit_probe(stage);
+        if (code == 0xffffffff) return 0;
         pr_info("seccomp finit_module probe = 0x%x\n", code);
-        /* SIGSYS (0xfffffffd) = filter kills; EPERM/ENOSYS = its RET_ERRNO actions.
-     * With init_cred + permissive SELinux a real probe fails with a normal
-     * errno instead. */
-        if (code == 0xfffffffd || code == 0xfffffffe || code == 0xffffffff ||
-            code == 1 || code == 38) {
+        if (seccomp_probe_blocked(code)) {
             return 0;
         }
         pr_success("child seccomp filter bypassed (finit_module errno=%u)\n", code);
         return 1;
+    }
+
+    /* Pre-W3 probe: answers "is a filter in the way?" instead of "did the
+     * bypass work?". One fork, no kernel writes. */
+    int32_t probe_child_seccomp_allowed_stage(void *context) {
+        auto *stage = static_cast<struct w2_stage_context *>(context);
+        const uint32_t code = run_seccomp_finit_probe(stage);
+        if (code == 0xffffffff) return 0;
+        pr_info("pre-W3 seccomp finit_module probe = 0x%x\n", code);
+        return seccomp_probe_blocked(code) ? 0 : 1;
     }
 
     int32_t verify_leaf_dir_stage(void *context) {

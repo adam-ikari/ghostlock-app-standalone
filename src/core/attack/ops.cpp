@@ -243,6 +243,7 @@ namespace ghostlock::attack {
             /* The root script is exec'd without the environment (execl), so the
              * component-package directory has to travel inside the script. */
             "LSPD_MODULES='%s'\n"
+            "SELINUX_FIXUP='%s'\n"
             "echo \"[*] root script start uid=$(id -u) euid=$(id -u)\" >\"$LOG\"\n"
             "chmod 644 \"$LOG\" 2>/dev/null\n"
             "echo \"[*] seccomp=$(grep Seccomp /proc/self/status 2>/dev/null | tr '\\n' ' ')\" >>\"$LOG\"\n"
@@ -355,6 +356,7 @@ namespace ghostlock::attack {
             "  printf '%%b' \"$CONFIG\" | dd of=\"$POLICY\" bs=1 seek=23 count=1 conv=notrunc\n"
             "}\n"
             "FIXUP_RC=1\n"
+            "if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
             "for i in $(seq 1 10); do\n"
             "  echo \"[*] fixup: attempt $i\" >>\"$LOG\"\n"
             "  if ! prepare_policy >>\"$LOG\" 2>&1; then\n"
@@ -381,12 +383,17 @@ namespace ghostlock::attack {
             "  sleep 2\n"
             "done\n"
             "echo \"[*] policy fixup rc=$FIXUP_RC\" >>\"$LOG\"\n"
-            "if [ \"$FIXUP_RC\" -eq 0 ]; then\n"
+            "else\n"
+            "  FIXUP_RC=2\n"
+            "  echo '[*] policy reload skipped (SELINUX_FIXUP=0)' >>\"$LOG\"\n"
+            "fi\n"
+            "if [ \"$FIXUP_RC\" -eq 0 ] || [ \"$FIXUP_RC\" -eq 2 ]; then\n"
             "# load_policy ok: late-load (module init re-enforces); already-loaded restores below\n"
-            "if grep -q kernelsu /proc/modules 2>/dev/null && [ -x /system/bin/su ]; then\n"
-            "  KSU_ALREADY=1\n"
-            "  echo \"[*] kernelsu already loaded; skipping late-load\" >>\"$LOG\"\n"
-            "elif grep -q kernelsu /proc/modules 2>/dev/null; then\n"
+            /* No `[ -x /system/bin/su ]` here: once a late-load has run, su is
+             * a magic mount and stat'ing it blocks the script. Re-running the
+             * late-load is harmless and is also what mounts su into this
+             * namespace, so the loaded case takes the same path. */
+            "if grep -q kernelsu /proc/modules 2>/dev/null; then\n"
             /* kernelsu is in memory but su was never mounted into this
              * namespace (the late-load is what mounts it). Re-run the
              * late-load so the root script can switch to the ksu domain. */
@@ -418,7 +425,7 @@ namespace ghostlock::attack {
             "  exit 1\n"
             "fi\n"
             "echo '[+] KernelSU module loaded' >>\"$LOG\"\n"
-            "if [ \"$KSU_ALREADY\" -eq 1 ]; then\n"
+            "if [ \"$KSU_ALREADY\" -eq 1 ] && [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
             "  echo \"[*] kernelsu already loaded; restoring enforcing\" >>\"$LOG\"\n"
             "  echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
             "fi\n"
@@ -459,16 +466,23 @@ namespace ghostlock::attack {
             /* The late-load above mounts su into this namespace, so the module
              * install can run in the ksu domain (the shell domain cannot
              * write /data/adb/modules_update). */
+            /* Probe su by running it instead of stat'ing it. KernelSU's su
+             * is a magic mount: `[ -x /system/bin/su ]` blocks the whole
+             * script on this device (both 2026-10-22 app runs stopped right
+             * after "modules dir=" with the helper script never written). An
+             * exec either answers or times out. */
             "  SU=''\n"
-            "  su_wait=0\n"
-            "  while [ $su_wait -lt 15 ]; do\n"
-            "    for cand in /system/bin/su /system/xbin/su; do\n"
-            "      if [ -x \"$cand\" ]; then SU=\"$cand\"; break; fi\n"
-            "    done\n"
-            "    [ -n \"$SU\" ] && break\n"
-            "    sleep 1\n"
-            "    su_wait=$((su_wait+1))\n"
+            "  if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
+            "  for cand in /system/bin/su /system/xbin/su; do\n"
+            "    SUOUT=$(timeout 10 \"$cand\" -c 'echo ghostlock-su-ok' 2>&1)\n"
+            "    case \"$SUOUT\" in *ghostlock-su-ok*) SU=\"$cand\"; break;; esac\n"
             "  done\n"
+            "  fi\n"
+            "  if [ -n \"$SU\" ]; then\n"
+            "    echo \"[*] su=$SU\" >>\"$LOG\"\n"
+            "  else\n"
+            "    echo '[!] su unavailable; skipping LSPosed stack' >>\"$LOG\"\n"
+            "  fi\n"
             "  if [ -z \"$SU\" ] || [ ! -x \"$KSU_KSUD\" ]; then\n"
             "    echo '[!] su or installed ksud missing; skipping LSPosed stack' >>\"$LOG\"\n"
             "  else\n"
@@ -596,6 +610,7 @@ namespace ghostlock::attack {
             session::g_exploit_session.profile.safe_mode() ? 1 : 0,
             (config::runtime_config_snapshot().ksud_path.c_str()),
             (config::runtime_config_snapshot().lspd_modules_path.c_str()),
+            (config::runtime_config_snapshot().selinux_fixup ? "1" : "0"),
             (config::runtime_config_snapshot().debug_dir.c_str()));
         if (n < 0 || n >= static_cast<int32_t>(script.size())) {
             pr_warning("root script too long\n");

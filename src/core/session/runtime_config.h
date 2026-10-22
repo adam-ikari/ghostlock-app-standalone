@@ -31,6 +31,16 @@ namespace ghostlock::config {
         std::string lspd_modules_path;
         /* Kernel-log dump directory from --dump-kernel-log; empty disables the dump. */
         std::string debug_dir;
+        /* Whether the root script reloads the SELinux policy to restore
+         * enforcing. "0" keeps SELinux permissive for this boot.
+         *
+         * The exploit leaves SELinux permissive; restoring enforcing means
+         * reloading the policy, and the reload re-initializes the LSM hooks
+         * while the kernel still holds the cred state the exploit wrote. On
+         * the Titan 2 that is where the __secure_computing oops came from
+         * (2026-10-22). Process-class switch (how this run behaves), read
+         * from GHOSTLOCK_SELINUX_FIXUP; default 1 = reload. */
+        int32_t selinux_fixup = 1;
 
         RuntimeConfig() noexcept = default;
 

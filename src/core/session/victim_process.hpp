@@ -33,6 +33,13 @@ namespace ghostlock::session::victim {
 
     int32_t verify_seccomp_probe_stage(void *context);
 
+    /* Pre-W3 probe: same forked finit_module check as
+     * verify_seccomp_probe_stage(), but it answers "is a filter in the way?"
+     * instead of "did the bypass work?". Returns 1 when the probe reached the
+     * kernel (a normal errno), 0 when the child's filter blocks the call
+     * (SIGSYS / EPERM / ENOSYS). Costs one fork, no kernel writes. */
+    int32_t probe_child_seccomp_allowed_stage(void *context);
+
     int32_t verify_leaf_dir_stage(void *context);
 } // namespace ghostlock::session::victim
 
