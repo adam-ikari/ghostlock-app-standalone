@@ -139,3 +139,22 @@ app 侧 `AndroidGhostlockRepository` 在发布组件包目录的同时设
 `Download/ghostlock-debug-log/` 导出后回传；判据是 `late-load` 出现在最后且
 LSPosed 管理器显示 Framework 2.2 / API 102。若 zygote 重启时注入不成立
 （此时 kernelsu.ko 尚未加载），才启动 P2。
+
+## 真机门禁结果（2026-10-22，构建 593）— PASS
+
+用户手机（Titan 2 / Android 16 / MT6878）执行 `ghostlock-593d-debug.apk`
+（sha256 `885148e3f1f8…`），**模块框架成功激活**。
+
+证据等级：用户口述结论，**没有归档当次日志**（手机与开发机不在一处，日志未回传）。
+所以这条记录只证明「这一条路径在真机上成立」；具体每一步的日志仍需补一份才能
+当作完整门禁证据链。要补的话：`Download/ghostlock-debug-log/<时间>/` 里
+`*.log.txt` 全上传一次即可。
+
+结论与后续：
+
+- P1 顺序（模块 → `post-fs-data` → `zygisk daemon ready` → 杀 zygote →
+  `zygote patched=1` → Vector daemon → 最后 `late-load`）在真机成立，
+  不需要再启动 P2（late-load 之后补写 `selinux_state` 的 L 级方案保持冻结）。
+- D3 口径变更：app 路线不再是「在修」，它是**主交付形态**；adb 路线退为诊断用途。
+- 遗留开关（`GHOSTLOCK_SELINUX_FIXUP` 默认值、W3 前 `finit_module` 预探针）
+  现在可以进入清理批次：app 路线显式传 `SELINUX_FIXUP=0`，CLI 路线才用 1。
