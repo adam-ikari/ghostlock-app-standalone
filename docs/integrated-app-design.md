@@ -39,7 +39,7 @@
 root 脚本是**唯一**在利用成功后天然就拥有 uid 0 的执行点：
 
 - app 自己不是 root（KernelSU 的 `allow_shell` 只放开 shell 用户）；
-- Shizuku 每次重启都要重新起（不满足「一键」）；
+- 外部 helper app 每次重启都要重新起（不满足「一键」）；
 - native 的 root child 已经把 cred 改成 root，脚本本身就是 root。
 
 改动性质：**只改脚本模板里的字符串**，不改任何攻击代码。

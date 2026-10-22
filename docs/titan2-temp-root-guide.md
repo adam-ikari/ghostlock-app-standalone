@@ -40,9 +40,8 @@ Titan 2 国际版已知的两个内核（对应固件）：
    - 选 **v3.3.1 或更新**：release 里有 `lkm-aarch64-android14-6.1_kernelsu.ko`，正好对上 Titan 2 的 KMI。
 2. 装 **「GhostLock Titan 2 版」**（本仓库构建：上游 GhostLock + Titan 2 的 profile + 运行前检查面板；
    上游正式版内置这份 profile 后就通用）。
-3. 手机若装了 Shizuku，先把 Shizuku 起起来（它就是给 app 一个 shell 身份跑利用，省掉 W3 阶段，更快）。
-4. 打开 app → 主页有 **「运行前检查」** 面板，逐项列出依赖与系统条件：
-   内核是否受支持 / profile 是否匹配且合法 / Shizuku 是否已装、是否在运行并已授权 /
+3. 打开 app → 主页有 **「运行前检查」** 面板，逐项列出依赖与系统条件：
+   内核是否受支持 / profile 是否匹配且合法 /
    是否装了带 `ksud` 的 KernelSU 管理器。
    **必须满足的项不满足时按钮是灰的**（app 会说明缺什么）；可选项（如 KernelSU 管理器）
    不满足时仍能跑，只是拿完 root 不会加载模块。

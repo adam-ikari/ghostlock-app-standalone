@@ -13,7 +13,6 @@
 | **KernelSU 系管理器 APK**（官方 KernelSU v3.3.1，`me.weishu.kernelsu`） | 提供 `ksud`（late-load 要用） | 官方 release；**必须 v3.3.1+**，它才有 `android14-6.1` 的 `kernelsu.ko` |
 | **Vector 管理器 app**（`org.matrix.vector.manager`） | 装/启用 LSPosed 模块、设作用域 | 随 Vector 模块 zip 里的 `manager.apk` |
 | `ZygiskNext-v1.5.2.zip` / `Vector-v2.2.zip` | 放进手机存储（如 `/sdcard/Download/`），供管理器从本地安装 | 官方 release |
-| **Shizuku**（可选但推荐） | 让 app 以 shell 身份跑利用 → 跳过 W3 阶段，更快更稳 | 装好后用「无线调试」起一次 |
 
 ## 每次开机：一步
 

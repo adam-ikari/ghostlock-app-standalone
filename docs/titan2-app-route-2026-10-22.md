@@ -1,11 +1,11 @@
-# app 路线（不依赖 Shizuku）的架构结论 —— 2026-10-22 真机验证
+# app 路线（不依赖任何外部 helper app）的架构结论 —— 2026-10-22 真机验证
 
 设备：Unihertz Titan 2 / Android 16 (SDK 36) / MediaTek MT6878。
 目标约束：**每次开机之后运行 app 就能 root + 注入模块框架**。
 
 ## 一、不再依赖 Shizuku
 
-| | `adb shell` | Shizuku UserService |
+| | `adb shell` | Shizuku UserService（已移除） |
 | --- | --- | --- |
 | uid | 2000 | 2000 |
 | SELinux 域 | `u:r:shell:s0` | `u:r:shell:s0` |
@@ -19,7 +19,11 @@ no app seccomp filter (adb/shell flow); skipping W3
 
 而 Shizuku 官方 13.6.0 在 **MediaTek** 机型上 UserService 根本起不来
 （`RikkaApps/Shizuku#1198`，复现设备就是 Unihertz Titan 2 / Android 16 / UID 2000），
-所以依赖 Shizuku = 依赖一个坏掉的东西。**app 走自己的直连路线**，Shizuku 降级为可选。
+所以依赖 Shizuku = 依赖一个坏掉的东西。**app 走自己的直连路线**。
+
+2026-10-22 后续：Shizuku 依赖已**彻底删除**（gradle 依赖、UserService + AIDL、
+执行入口、UI 开关、profile 里的 `recommend_shizuku` 字段全部移除），
+app 只剩直连路线。证据见 `docs/titan2-shizuku-removal-2026-10-22.md`。
 
 ## 二、app 路线各环节的权限事实（都是实测）
 
