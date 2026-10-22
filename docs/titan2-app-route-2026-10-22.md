@@ -74,3 +74,33 @@ ksud module install
    （`ceDataInode=0`）→ **sideload 的 app 无法启动**，报
    `Activity class ... does not exist`（看起来像 APK 坏了，其实是设备没解锁）。
    **开机后先解锁手机，再打开 app。**
+
+## 七、这一天的完整验证链（含三次误判的教训）
+
+### 验证顺序
+
+1. `adb shell` 路线（host 上跑 native）：**全部通过**
+   - 利用一次命中 → root → KernelSU → 装模块 → 杀 zygote → 注入 →
+     `zygote_states:1` / `modules64:1,zygisk_vector` → Vector daemon 起来 →
+     `cli status` = Framework 2.2 / API 102 / Enabled Modules 12
+2. app 路线（app 进程里跑 native）：**root 成功**（`[+] KernelSU ready`、界面 `exit code=0`），
+   LSPosed 段**手动执行 root script 时也全部通过**（同样的 `zygote_states:1` /
+   `modules64:1,zygisk_vector` / `LSPosed stack setup done`）
+
+### 三次误判（都是环境问题，不是代码问题，但都暴露了真实的约束）
+
+| # | 现象 | 真因 | 结论 |
+| --- | --- | --- | --- |
+| 1 | 手动跑 root script 成功，app 自动跑却停在 `modules dir=` 之后 | app 那次 `KSU_ALREADY=1`（KernelSU 已在内存）→ **跳过 late-load** → late-load 才是把 su 挂进 namespace 的那一步 → 段里找不到 su | 补一条：kernelsu 已加载但 su 缺失时**补跑 late-load** |
+| 2 | `ksud module install` 报 `/data/adb/ksu/bin is not a regular directory` | app 目录里的 libksud.so 切到 ksu 域后，**看不到 /data/adb/ksu/bin**（那是 KernelSU 管理器 app 的 mount） | 装模块用**已安装那份** `/data/adb/ksu/bin/ksud`；post-fs-data 用 app 目录那份（它才有 logcat 权限） |
+| 3 | `am start` 报 `Activity class ... does not exist` | **手机重启后没解锁**：`dumpsys user` = `0=RUNNING_LOCKED`，`ceDataInode=0`（CE 存储没建）→ 侧载 app 起不来 | 每次重启后**先解锁**再开 app；`pm enable` 也需要 |
+
+### 两条路线的对照
+
+| | adb shell 路线 | app 路线 |
+| --- | --- | --- |
+| 谁提供 su | adbd 的 shell（一直有） | late-load 挂进 app 的 namespace（需本次运行做过 late-load） |
+| 装模块 | `su -c`（adb shell 里有 su ✓） | `su -c`（late-load 后才有 ✓） |
+| 组件包可见性 | 任何域可读（`/data/local/tmp`） | app 自己的 external files dir（FUSE，ksu 域可读 ✓） |
+| 结论 | ✅ 稳定 | ✅ 稳定（需先解锁 + pm enable） |
+
