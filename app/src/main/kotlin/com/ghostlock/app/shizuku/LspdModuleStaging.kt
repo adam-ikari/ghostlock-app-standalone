@@ -17,14 +17,23 @@ import java.io.File
  * recovery, so the plain one-tap root path must never enter that code.
  */
 object LspdModuleStaging {
-    /** Directory the root script reads; under /data/local/tmp so uid 0 sees it. */
-    private const val PublishedDir = "/data/local/tmp/ghostlock-modules"
-
-    /** The app-private directory the user picks the zips into. */
+    /**
+     * The app-private directory the user picks the zips into.
+     *
+     * It has to stay app-private: the app cannot write to /data/local/tmp
+     * (that directory belongs to the shell user), and the root script runs in
+     * the shell domain, which reaches app private data through the ksu
+     * domain when the module install runs `su -c`.
+     */
     private const val PrivateDir = "modules"
 
+    /** Sub-directory of the app's files dir the native root script reads. */
+    private const val PublishedDir = "modules-published"
+
     /**
-     * Copies the selected component packages to [PublishedDir] and returns it.
+     * Copies the selected component packages next to the app's other runtime
+     * files and returns the directory, or null when there is nothing to
+     * install.
      *
      * Returns null when the user selected no packages, or when the copy
      * failed — in both cases the native must not touch the LSPosed stack.
@@ -36,7 +45,7 @@ object LspdModuleStaging {
             .orEmpty()
         if (zips.isEmpty()) return null
 
-        val published = File(PublishedDir)
+        val published = File(context.filesDir, PublishedDir)
         if (!published.isDirectory && !published.mkdirs()) return null
         // Stale packages from an earlier run would be installed again.
         published.listFiles()?.forEach { it.delete() }
@@ -63,7 +72,7 @@ object LspdModuleStaging {
         val hasZip = private.listFiles { file -> file.isFile && file.name.endsWith(".zip") }
             ?.isNotEmpty() == true
         if (!hasZip) return null
-        val published = File(PublishedDir)
+        val published = File(context.filesDir, PublishedDir)
         if (!published.isDirectory) return null
         val hasPublished = published.listFiles { file -> file.isFile && file.name.endsWith(".zip") }
             ?.isNotEmpty() == true

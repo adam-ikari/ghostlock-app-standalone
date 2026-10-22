@@ -240,6 +240,9 @@ namespace ghostlock::attack {
             "LOG='%s'\n"
             "SAFE_MODE=%d\n"
             "KSUD='%s'\n"
+            /* The root script is exec'd without the environment (execl), so the
+             * component-package directory has to travel inside the script. */
+            "LSPD_MODULES='%s'\n"
             "echo \"[*] root script start uid=$(id -u) euid=$(id -u)\" >\"$LOG\"\n"
             "chmod 644 \"$LOG\" 2>/dev/null\n"
             "echo \"[*] seccomp=$(grep Seccomp /proc/self/status 2>/dev/null | tr '\\n' ' ')\" >>\"$LOG\"\n"
@@ -431,56 +434,114 @@ namespace ghostlock::attack {
              * 少一步或顺序反了都会掉进 recovery，所以这段脚本刻意保守：
              * 拿不到 zygote 就**不**起 Vector daemon，宁可不激活 LSPosed，
              * 也不冒把设备带进 recovery 的风险。 */
-            "if [ -n \"$GHOSTLOCK_LSPD_MODULES\" ] && [ -d \"$GHOSTLOCK_LSPD_MODULES\" ]; then\n"
-            "  MODZIP_DIR=\"$GHOSTLOCK_LSPD_MODULES\"\n"
+            "if [ -n \"$LSPD_MODULES\" ]; then\n"
+            "  MODZIP_DIR=\"$LSPD_MODULES\"\n"
             "  echo \"[*] modules dir=$MODZIP_DIR\" >>\"$LOG\"\n"
-            "  SU=/system/bin/su\n"
+            /* KernelSU injects /system/bin/su only after the late-load, and it
+             * can appear a moment later than the module shows up. Look it up in
+             * PATH and wait for it, otherwise the whole stack is skipped for
+             * the wrong reason. */
+            "  SU=''\n"
+            "  su_wait=0\n"
+            "  while [ $su_wait -lt 15 ]; do\n"
+            "    for cand in /system/bin/su /system/xbin/su; do\n"
+            "      if [ -x \"$cand\" ]; then SU=\"$cand\"; break; fi\n"
+            "    done\n"
+            "    [ -n \"$SU\" ] && break\n"
+            "    sleep 1\n"
+            "    su_wait=$((su_wait+1))\n"
+            "  done\n"
             "  KSU_KSUD=/data/adb/ksu/bin/ksud\n"
-            "  if [ ! -x \"$SU\" ] || [ ! -x \"$KSU_KSUD\" ]; then\n"
+            /* Every su call is wrapped in timeout: right after the late-load
+             * the su helper can block while the KernelSU service settles,
+             * and a blocked call would hang the whole root script. */
+            "  SUC() { timeout 30 \"$SU\" -c \"$1\"; }\n"
+            "  if [ -z \"$SU\" ] || [ ! -x \"$KSU_KSUD\" ]; then\n"
             "    echo '[!] su or installed ksud missing; skipping LSPosed stack' >>\"$LOG\"\n"
+            "  elif ! SUC \"test -d '$LSPD_MODULES'\" 2>/dev/null; then\n"
+            "    echo '[!] component package dir not reachable; skipping LSPosed stack' >>\"$LOG\"\n"
             "  else\n"
             "    echo '[*] removing stale module dirs' >>\"$LOG\"\n"
-            "    \"$SU\" -c 'rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu' >>\"$LOG\" 2>&1\n"
-            "    for z in \"$MODZIP_DIR\"/*.zip; do\n"
+            "    SUC 'rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu' >>\"$LOG\" 2>&1\n"
+            /* The packages live in the app's private data dir, which the shell
+             * domain cannot read, so both the listing and the install run
+             * inside su (ksu domain). */
+            "    ZIPS=$(SUC 'ls \"$LSPD_MODULES\"/*.zip 2>/dev/null')\n"
+            "    for z in $ZIPS; do\n"
             "      [ -f \"$z\" ] || continue\n"
             "      echo \"[*] installing module $z\" >>\"$LOG\"\n"
-            "      \"$SU\" -c \"$KSU_KSUD module install '$z'\" >>\"$LOG\" 2>&1\n"
+            "      SUC \"$KSU_KSUD module install '$z'\" >>\"$LOG\" 2>&1\n"
             "      echo \"[*] module install exit=$?\" >>\"$LOG\"\n"
             "    done\n"
             "    echo '[*] late-load (apply modules)' >>\"$LOG\"\n"
-            "    \"$SU\" -c \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
+            "    SUC \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
             "    echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
             "    echo '[*] starting zygisk daemon (post-fs-data)' >>\"$LOG\"\n"
-            "    \"$SU\" -c \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
-            "    sleep 8\n"
+            "    SUC \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
+            /* Give the zygisk daemon a moment to come up before zygote is
+             * restarted, otherwise the new zygote starts without the
+             * injection. The check reads /proc directly: `ps -A` walks every
+             * process's cmdline and stalls in the shell domain. */
+            "    sleep 6\n"
+            /* zygisk 模块是在 zygote 启动的那一刻被 preload 的。运行时装模块
+             * 不会影响已经跑着的 zygote，所以必须重启它，让 ZygiskNext 的
+             * injector 接管新起的 zygote（新的 zygote 带 -Xzygote 参数，
+             * Vector 的 zygisk 模块也会被 preload）。
+             * webview_zygote 是 zygote64 的子进程，杀 zygote64 会一起带走它；
+             * 只杀一个会让 framework 起不来 → recovery。 */
+            "    echo '[*] restarting zygote64 so the zygisk modules get preloaded' >>\"$LOG\"\n"
+            "    OLD_ZYGOTE=$(SUC 'pidof zygote64' 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
+            "    if [ -n \"$OLD_ZYGOTE\" ]; then\n"
+            "      echo \"[*] killing zygote64 pid=$OLD_ZYGOTE\" >>\"$LOG\"\n"
+            "      SUC \"kill -9 $OLD_ZYGOTE\" >>\"$LOG\" 2>&1\n"
+            "    fi\n"
             "    ZNCTL=/data/adb/ksu/bin/znctl\n"
+            /* One su call for the whole wait: forking su per poll is slow
+             * enough in the shell domain that 90 polls never finish. The
+             * helper script runs inside su (ksu domain) and stops as soon as
+             * the zygisk modules are preloaded into the new zygote. */
+            "    cat >/data/local/tmp/.ghostlock_znwait.sh <<'ZNWAITEOF'\n"
+            "#!/system/bin/sh\n"
+            "i=0\n"
+            "while [ $i -lt 90 ]; do\n"
+            "  s=$(/data/adb/ksu/bin/znctl status 2>/dev/null)\n"
+            "  case \"$s\" in *zygote_states:1*) echo \"$s\"; exit 0;; esac\n"
+            "  sleep 1\n"
+            "  i=$((i+1))\n"
+            "done\n"
+            "exit 1\n"
+            "ZNWAITEOF\n"
+            "    ZSTAT=$(SUC 'sh /data/local/tmp/.ghostlock_znwait.sh' 2>/dev/null)\n"
             "    ZGONE=0\n"
-            "    i=0\n"
-            "    while [ $i -lt 60 ]; do\n"
-            "      if [ -x \"$ZNCTL\" ] && \"$SU\" -c \"$ZNCTL status\" 2>/dev/null | grep -q 'zygote_states:1'; then\n"
-            "        ZGONE=1\n"
-            "        break\n"
-            "      fi\n"
-            "      sleep 1\n"
-            "      i=$((i+1))\n"
-            "    done\n"
+            "    if [ -n \"$ZSTAT\" ]; then ZGONE=1; fi\n"
             "    echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
-            "    if [ \"$ZGONE\" = \"1\" ]; then\n"
+            /* Vector's zygisk module must be in the list too, otherwise the
+             * daemon has nothing to inject and stays useless. */
+            "    ZMODS=$(echo \"$ZSTAT\" | grep '^modules64:' | head -1)\n"
+            "    if [ -z \"$ZMODS\" ]; then ZMODS=$(SUC \"/data/adb/ksu/bin/znctl status\" 2>/dev/null | grep '^modules64:' | head -1); fi\n"
+            "    echo \"[*] zygisk modules: $ZMODS\" >>\"$LOG\"\n"
+            "    if [ \"$ZGONE\" = \"1\" ] && echo \"$ZMODS\" | grep -q 'zygisk_vector'; then\n"
             "      echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
             "      sleep 60\n"
             "      if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
             "        echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
-            "        \"$SU\" -c 'cd /data/adb/modules/zygisk_vector && (./daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &)' >>\"$LOG\" 2>&1\n"
-            "        sleep 8\n"
+            /* 必须用**绝对路径**：daemon 脚本内部用 dir="${0%/*}" 定位自己的
+             * 目录，相对路径会让 -Djava.class.path=daemon.apk 变成相对路径 →
+             * UnsatisfiedLinkError → daemon 静默退出（2026-10-22 真机踩到）。
+             * toybox 的 unshare 不支持 --propagation slave，只能用 -m。 */
+            "        SUC 'unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &' >>\"$LOG\" 2>&1\n"
+            "        sleep 20\n"
             "      fi\n"
+            "    elif [ \"$ZGONE\" = \"1\" ]; then\n"
+            "      echo '[!] zygisk module list has no zygisk_vector; skipping Vector daemon' >>\"$LOG\"\n"
             "    else\n"
             "      echo '[!] zygote not patched; skipping Vector daemon to avoid the system_server restart loop' >>\"$LOG\"\n"
             "    fi\n"
             "    if [ -x /data/adb/modules/zygisk_vector/cli ]; then\n"
             "      echo '== vector cli status ==' >>\"$LOG\"\n"
-            "      \"$SU\" -c '/data/adb/modules/zygisk_vector/cli status' >>\"$LOG\" 2>&1\n"
+            "      SUC '/data/adb/modules/zygisk_vector/cli status' >>\"$LOG\" 2>&1\n"
             "      echo '== zygisk next status ==' >>\"$LOG\"\n"
-            "      \"$SU\" -c \"$ZNCTL status\" >>\"$LOG\" 2>&1\n"
+            "      SUC \"$ZNCTL status\" >>\"$LOG\" 2>&1\n"
             "    fi\n"
             "    echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
             "  fi\n"
@@ -494,6 +555,7 @@ namespace ghostlock::attack {
             (config::runtime_config_snapshot().ksu_log_path.c_str()),
             session::g_exploit_session.profile.safe_mode() ? 1 : 0,
             (config::runtime_config_snapshot().ksud_path.c_str()),
+            (config::runtime_config_snapshot().lspd_modules_path.c_str()),
             (config::runtime_config_snapshot().debug_dir.c_str()));
         if (n < 0 || n >= static_cast<int32_t>(script.size())) {
             pr_warning("root script too long\n");

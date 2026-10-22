@@ -23,6 +23,12 @@ namespace ghostlock::config {
         /* ksud binary from GHOSTLOCK_KSUD, shell-escaped for the root
          * script; empty keeps the script's own search order. */
         std::string ksud_path;
+        /* Directory holding the ZygiskNext / Vector component packages, from
+         * GHOSTLOCK_LSPD_MODULES, shell-escaped for the root script. Empty
+         * means the LSPosed stack is not part of this run. The root script is
+         * exec'd without the environment (execl, not execle), so the path has
+         * to be embedded in the script itself. */
+        std::string lspd_modules_path;
         /* Kernel-log dump directory from --dump-kernel-log; empty disables the dump. */
         std::string debug_dir;
 
