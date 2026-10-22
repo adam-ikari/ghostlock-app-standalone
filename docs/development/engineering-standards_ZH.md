@@ -67,7 +67,7 @@ L 级改动必须先给出设计并获得用户认可，再写代码。
 ### 2.1 三层与依赖方向
 
 ```
-app/ (Kotlin, UI/domain/data/shizuku)
+app/ (Kotlin, UI/domain/data/runtime)
   │  ProcessBuilder（不是 JNI）：stdin 写 GLK1、stdout/stderr 收日志、退出码表达结果
   ▼
 src/core/ (C++23 可执行 ELF)          tools/extract_rs/ (Rust 离线提取器)
@@ -75,7 +75,7 @@ src/core/ (C++23 可执行 ELF)          tools/extract_rs/ (Rust 离线提取器
 
 - 层间契约只能是进程、文件、stdin/stdout、退出码，以及 GLK1/HOCON profile 文本。新增跨层状态必须经
   profile 或文件，不得发明新环境变量（§3.1）。
-- Kotlin 分层：`ui → domain → data`；平台 I/O 只允许在 `data/`；`shizuku/` 是执行入口的变体，
+- Kotlin 分层：`ui → domain → data`；平台 I/O 只允许在 `data/`；`runtime/` 放执行入口的辅助代码，
   不承载业务规则。
 - Native 命名空间分层：`ghostlock::{route,session,memory,attack,race,support,profile}`。
   include 一律相对 `src/core`（`#include "route/..."`），让所有权在调用点可见。

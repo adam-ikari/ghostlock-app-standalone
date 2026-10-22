@@ -5,7 +5,7 @@
 GhostLock 用 `uname -r` 精确匹配内核版本。匹配不到时应用会拒绝运行。支持一款
 新内核通常不用改代码，只要补一份 profile（HOCON 配置）。
 
-只有内核几何（符号与结构体偏移）是必填项。`recommend_shizuku` 和 `execution`
+只有内核几何（符号与结构体偏移）是必填项。`execution`
 里的重试次数、等待时间都是建议值：profile 可以省略，省略时使用随包默认值。
 见[公共执行默认值](defaults_ZH.md)。
 
@@ -76,7 +76,7 @@ GhostLock 用 `uname -r` 精确匹配内核版本。匹配不到时应用会拒�
 
 5. **逐字段转录并自检。**
    字段含义与必填要求见 [Profile 结构文档](PROFILE_SCHEMA_ZH.md)。确认所有必填的
-   `off_*` 非零，task/cred 布局来自同一镜像，然后按需设置 `recommend_shizuku`
+   `off_*` 非零，task/cred 布局来自同一镜像
    （默认 `0`；部分随包 profile 设为 `1`）。
 
 6. **确有必要时才改 `execution`。**

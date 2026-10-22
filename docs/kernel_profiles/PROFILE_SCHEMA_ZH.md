@@ -48,7 +48,7 @@ filesDir/offsets.conf                     解析/导入的偏移（imported，HO
         ▼  ProfileConfigController.resolve（Kotlin）
    resolved profile（单对象，全字段已合并）
         │
-        ├──▶ 运行：类型化二进制（direct 与 Shizuku 都把字节写入 native 的 stdin）
+        ├──▶ 运行：类型化二进制（app 把字节写入 native 的 stdin）
         │      native 只解析并使用几何；不做参数校验
         ├──▶ 快照：filesDir/<release>.conf（HOCON，导出配置的源）
         └──▶ UI：参数覆盖页 / 高级参数覆盖树
@@ -169,7 +169,6 @@ route { multicast_waiter { waiter_off = 96, buffer_size = 264 } }
 | `offset.slide_nfulnl_logger` / `offset.slide_boot_id` / `offset.slide_loggers_0_1` | 地址滑移（KASLR）定位点 |
 | `kernel_phys_load` | 内核物理加载地址（0 时按 SoC 公式回退） |
 | `kernel_phys_offset` | DRAM 基址 / linear-map `PHYS_OFFSET`，用于 image→direct-map 换算（缺省用编译期 `P0_PHYS_OFFSET = 0x80000000`）。DRAM 基址不同的设备需填写（如 MTK `0x40000000`）。仅凭 `boot.img` 无法取得，取自 `/proc/iomem`（提取器可用 `--iomem`，或 MediaTek 的 `vendor_boot.img`） |
-| `recommend_shizuku` | 该内核是否建议走 Shizuku（0/1，省略时为 0；仅提示不强制）。不在任何编辑器中显示：推荐内核在**每次启动时自动打开**主页“Run via Shizuku”开关，会话内可手动关闭，关闭后本次会话不再要求 Shizuku |
 
 ### 4.4 select_stack / tcp 路由字段
 
@@ -273,7 +272,7 @@ v2 是唯一版本：Kotlin 与 native 版本绑定，不做旧版本兼容解�
   section/键忽略；重复键 last-wins。`middleware` 承载 route。权威 section/键表在
   `profile/binary.cpp`（`kSections`），`NativeProfile.kt` 的对象 section 必须
   逐字对齐。
-- App 调用：direct 与 Shizuku 均通过 `--ghostlock-app-call` 从 **stdin** 传入
+- App 调用：通过 `--ghostlock-app-call` 从 **stdin** 传入
   profile，不写入 `active-profile.bin`。命令行运行时，
   `--load-prebuilt-profile <bin>` 从导出的 GLK1 文件读取。
 - native 只有一条解码路径：`profile/entry.cpp` 把 stdin（或文件）字节交给

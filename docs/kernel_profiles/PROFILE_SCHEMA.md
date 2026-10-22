@@ -59,7 +59,7 @@ internal overrides (sparse HOCON text)    written by the advanced override page
         ▼  ProfileConfigController.resolve (Kotlin)
    resolved profile (one object, every field merged)
         │
-        ├──▶ runtime: typed binary (direct and Shizuku both write it to native's stdin)
+        ├──▶ runtime: typed binary (the app writes it to native's stdin)
         │      native parses it and uses the geometry; it validates nothing
         ├──▶ snapshot: filesDir/<release>.conf (HOCON; the source for exports)
         └──▶ UI: override page / advanced override tree
@@ -187,7 +187,6 @@ addresses into runtime addresses.
 | `offset.slide_nfulnl_logger` / `offset.slide_boot_id` / `offset.slide_loggers_0_1` | KASLR slide anchors |
 | `kernel_phys_load` | Kernel physical load address (0 falls back to the SoC formula) |
 | `kernel_phys_offset` | DRAM base / linear-map `PHYS_OFFSET` used for image→direct-map translation (default: compiled `P0_PHYS_OFFSET = 0x80000000`). Set it for devices whose DRAM base differs (e.g. MTK `0x40000000`). A `boot.img` alone cannot supply it; take it from `/proc/iomem` (the extractor accepts `--iomem`, or a MediaTek `vendor_boot.img`) |
-| `recommend_shizuku` | Whether this kernel recommends the Shizuku path (0/1, default 0 when omitted; advisory only). It is not shown in any editor: for recommended kernels the app **turns the home-screen "Run via Shizuku" switch on at every start**. You can turn it off for the session, and once off the app stops requiring Shizuku for that session |
 
 ### 4.4 select_stack / tcp route fields
 
@@ -308,7 +307,7 @@ version-bound and there is no legacy decode.
   sections/keys are ignored and duplicate keys are last-wins. `middleware` carries the
   route. The authoritative section/key tables are `profile/binary.cpp` (`kSections`);
   the Kotlin object sections in `NativeProfile.kt` must follow them exactly.
-- App invocation: direct and Shizuku both pass the profile on **stdin** with
+- App invocation: the app passes the profile on **stdin** with
   `--ghostlock-app-call`. The app does not write `active-profile.bin`.
   For CLI runs, `--load-prebuilt-profile <bin>` reads an exported GLK1 file.
 - Native has exactly one decode path: `profile/entry.cpp` hands the stdin (or

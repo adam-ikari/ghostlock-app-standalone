@@ -63,11 +63,8 @@
     <string name="check_state_optional">Optional — the run still works, without module loading</string>
     <string name="check_kernel">Kernel supported</string>
     <string name="check_profile">Profile matched and valid</string>
-    <string name="check_shizuku_app">Shizuku installed (separate app)</string>
-    <string name="check_shizuku_ready">Shizuku running and authorized</string>
     <string name="check_already_rooted">Device is not rooted yet (a rooted device skips the exploit)</string>
     <string name="check_kernelsu_manager">KernelSU manager installed (supplies ksud)</string>
-    <string name="run_blocked_shizuku">Shizuku is not ready; tap the status card to start or authorize</string>
     <string name="export_share">Share offsets</string>
     <string name="export_failed">Export failed</string>
     <string name="export_current_marker">%1$s (current device)</string>
@@ -84,7 +81,6 @@
     <string name="kernel_profile_required">Profile required</string>
     <string name="kernel_profile_invalid">Profile needs correction</string>
     <string name="kernel_profile_ready">Profile ready</string>
-    <string name="kernel_profile_ready_shizuku">Shizuku ready</string>
     <string name="kernel_unsupported_summary">No matching kernel profile</string>
     <string name="kernel_profile_required_summary">Load a profile to continue</string>
     <string name="kernel_profile_invalid_summary">Correct the marked fields</string>
@@ -96,13 +92,6 @@
     <string name="safe_mode_summary">Disable all modules</string>
     <string name="force_attack_test_label">Force attack test</string>
     <string name="force_attack_test_summary">Ignore an existing KernelSU root and run the exploit anyway; the rooted child is discarded at the end</string>
-    <string name="shizuku_label">Run via Shizuku</string>
-    <string name="shizuku_summary">Skip Seccomp bypass</string>
-    <string name="shizuku_recommended_hint">This kernel recommends running via Shizuku</string>
-    <string name="shizuku_status_not_running">Start Shizuku, then return here</string>
-    <string name="shizuku_status_permission_required">Grant Shizuku access when asked</string>
-    <string name="shizuku_status_ready">Shizuku ready</string>
-    <string name="shizuku_status_checking">Checking Shizuku status</string>
     <string name="manager_label">Root manager</string>
     <string name="manager_summary_auto">Auto (recommended)</string>
     <string name="manager_picker_title">Choose root manager</string>
@@ -110,9 +99,6 @@
     <string name="manager_no_ksud">No libksud.so detected, may not work</string>
     <string name="manager_show_all">Show all apps</string>
     <string name="manager_hide_all">Show compatible only</string>
-    <string name="w3_shizuku_hint_title">Enable Shizuku?</string>
-    <string name="w3_shizuku_hint_message">The last run failed at the W3 seccomp bypass stage. Running via Shizuku (shell uid, no seccomp) skips it.</string>
-    <string name="w3_shizuku_hint_enable">Enable</string>
     <string name="run_interrupted_title">Previous run interrupted</string>
     <string name="run_interrupted_message">The last attack stopped mid-way (the device may have panicked and rebooted). Check the device and try again.</string>
     <string name="dialog_dismiss">Dismiss</string>

@@ -93,7 +93,6 @@ int32_t main(void) {
     values.uname_r = "6.6.77-transport-test";
     values.route = ghostlock::profile::kRouteMulticastWaiter;
     values.meta.kernel_major = 6;
-    values.meta.recommend_shizuku = 1;
     values.meta.fallback_route = ghostlock::profile::kRouteSelectStack;
     values.task.prio = 132;
     values.task.real_cred = 0x12345678;
@@ -114,7 +113,6 @@ int32_t main(void) {
     assert(strcmp(release, values.uname_r) == 0);
     assert(strcmp(parsed.uname_r, values.uname_r) == 0);
     assert(parsed.meta.kernel_major == 6);
-    assert(parsed.meta.recommend_shizuku == 1);
     assert(parsed.route == ghostlock::profile::kRouteMulticastWaiter);
     assert(parsed.meta.fallback_route == ghostlock::profile::kRouteSelectStack);
     assert(parsed.task.prio == 132);

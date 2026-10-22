@@ -7,8 +7,8 @@ refuses to run. Supporting a new kernel usually needs no code change, only a
 profile (a HOCON config file) for that kernel.
 
 Only kernel geometry (symbol and struct offsets) is required.
-`recommend_shizuku` and the retry/wait values under `execution` are
-suggestions: a profile may omit them and the shipped default applies. See
+The retry/wait values under `execution` are suggestions: a profile may omit
+them and the shipped default applies. See
 [Shared execution defaults](defaults.md).
 
 ## Before you start
@@ -89,8 +89,7 @@ Field meanings, the required-field matrix, and validation rules are in the
 5. **Transcribe field by field, then check your work.**
    Field meanings and requirements are in the
    [Profile schema](PROFILE_SCHEMA.md). Confirm every required `off_*` is
-   non-zero and that the task/cred layout comes from the same image. Set
-   `recommend_shizuku` as needed (default `0`; some shipped profiles set `1`).
+   non-zero and that the task/cred layout comes from the same image.
 
 6. **Change `execution` only with device evidence.**
    Otherwise keep the [shared defaults](defaults.md). You can try values on

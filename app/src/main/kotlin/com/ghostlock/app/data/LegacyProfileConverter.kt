@@ -3,7 +3,7 @@ package com.ghostlock.app.data
 /**
  * Converts remote/main-era offsets.json entries into the current layout.
  *
- * That era only shipped 6.x kernels with no Shizuku path and no 5.x geometry:
+ * That era only shipped 6.x kernels and no 5.x geometry:
  * the extractor report carries `kernel_phys_load`, `pselect_waiter_shift`,
  * `compact_waiter`, `mm_struct_sz`, a `symbols` object keyed by `off_*`, a
  * `struct_fields` object keyed by `task_*`, plus `kimage_text_base`/`btf_size`

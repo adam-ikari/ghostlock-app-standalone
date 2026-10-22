@@ -80,7 +80,6 @@ namespace ghostlock::profile {
      * meaningful). The wire carries presence by key occurrence. */
     struct ProfileMeta {
         uint8_t kernel_major = 0;
-        uint8_t recommend_shizuku = 0;
         uint8_t fallback_route = 0;
         uint8_t safe_mode = 0;
     };

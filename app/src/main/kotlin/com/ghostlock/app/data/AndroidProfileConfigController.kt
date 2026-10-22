@@ -762,9 +762,7 @@ internal class AndroidProfileConfigController(
                     }
                 }
 
-                value is Number -> if (path != "schema_version" && path != "release" &&
-                    path != "recommend_shizuku"
-                ) {
+                value is Number -> if (path != "schema_version" && path != "release") {
                     val overrideValue = override.getLongAt(path)
                     leaves += ProfileFieldNode(
                         path = path,
@@ -775,9 +773,7 @@ internal class AndroidProfileConfigController(
                     )
                 }
 
-                value == null -> if (path != "schema_version" && path != "release" &&
-                    path != "recommend_shizuku"
-                ) {
+                value == null -> if (path != "schema_version" && path != "release") {
                     leaves += ProfileFieldNode(
                         path = path,
                         name = key,

@@ -10,7 +10,7 @@ import com.ghostlock.app.data.route.RouteKind
  */
 object ProfileResolver {
     private val KnownTopLevel = setOf(
-        "release", "schema_version", "kernel_major", "recommend_shizuku",
+        "release", "schema_version", "kernel_major",
         "route", "fallback", "kernelsnitch", "task_struct", "cred", "offset",
         "kernel_phys_load", "kernel_phys_offset", "execution",
     )

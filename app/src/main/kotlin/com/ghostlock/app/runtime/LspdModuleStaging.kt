@@ -1,4 +1,4 @@
-package com.ghostlock.app.shizuku
+package com.ghostlock.app.runtime
 
 import android.content.Context
 import java.io.File
@@ -42,6 +42,11 @@ object LspdModuleStaging {
      * both, so the app-private dir stays the staging area and the external
      * one is what the native side is pointed at.
      *
+     * Each run publishes into its own directory: a reinstall gives the app a
+     * new uid, and the leftovers of the previous one are still owned by the
+     * old uid — writing into them fails, and the whole stage would be
+     * skipped for the wrong reason.
+     *
      * Returns null when the user selected no packages, or when the copy
      * failed — in both cases the native must not touch the LSPosed stack.
      */
@@ -53,10 +58,8 @@ object LspdModuleStaging {
         if (zips.isEmpty()) return null
 
         val external = context.getExternalFilesDir(null) ?: return null
-        val published = File(external, PublishedDir)
-        if (!published.isDirectory && !published.mkdirs()) return null
-        // Stale packages from an earlier run would be installed again.
-        published.listFiles()?.forEach { it.delete() }
+        val published = File(external, "$PublishedDir-${System.currentTimeMillis()}")
+        if (!published.mkdirs()) return null
 
         for (zip in zips) {
             val target = File(published, zip.name)
@@ -64,7 +67,9 @@ object LspdModuleStaging {
                 zip.inputStream().use { input -> target.outputStream().use { input.copyTo(it) } }
             }.isSuccess && target.isFile && target.length() == zip.length()
             if (!copied) {
-                published.listFiles()?.forEach { it.delete() }
+                /* Only drop what this attempt wrote; the directory itself may
+                 * already hold a complete set from an earlier attempt. */
+                target.delete()
                 return null
             }
         }
@@ -81,8 +86,11 @@ object LspdModuleStaging {
             ?.isNotEmpty() == true
         if (!hasZip) return null
         val external = context.getExternalFilesDir(null) ?: return null
-        val published = File(external, PublishedDir)
-        if (!published.isDirectory) return null
+        /* The newest published directory wins; older ones belong to a
+         * previous app uid and cannot be written to. */
+        val published = external.listFiles { file -> file.isDirectory && file.name.startsWith(PublishedDir) }
+            ?.maxByOrNull { it.lastModified() }
+            ?: return null
         val hasPublished = published.listFiles { file -> file.isFile && file.name.endsWith(".zip") }
             ?.isNotEmpty() == true
         return if (hasPublished) published.absolutePath else null

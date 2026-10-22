@@ -64,7 +64,6 @@ import com.ghostlock.app.domain.model.CpuPair
 import com.ghostlock.app.domain.model.ExecutionFieldValue
 import com.ghostlock.app.domain.model.ProfileFieldNode
 import com.ghostlock.app.domain.model.RunCheck
-import com.ghostlock.app.domain.model.ShizukuStatus
 import com.ghostlock.app.domain.model.UserProfileFile
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -108,8 +107,6 @@ data class GhostlockUiState(
     val kernelRelease: String = "",
     val socName: String = "",
     val kernelSupported: Boolean = false,
-    val shizukuEnabled: Boolean = false,
-    val shizukuStatus: ShizukuStatus = ShizukuStatus.NOT_REQUIRED,
     val running: Boolean = false,
     val cpuPairLabels: List<String> = emptyList(),
     val cpuPairIndex: Int = 0,
@@ -182,14 +179,13 @@ data class GhostlockUiState(
     val runChecks: List<com.ghostlock.app.domain.model.RunCheck> = emptyList(),
 )
 
-enum class DialogType { NONE, LIST, INPUT, CONFIRM, NOTICE }
+enum class DialogType { NONE, LIST, INPUT, NOTICE }
 
 data class GhostlockLogLine(val text: String, val color: Int)
 
 interface GhostlockActions {
     fun onRun()
     fun onProfileInvalid()
-    fun onStatusClick()
     fun onCloseExecutionSheet()
     fun onCopyLogs()
     fun onImportOffsetsHocon()
@@ -200,7 +196,6 @@ interface GhostlockActions {
     fun onCpuPairSelected(index: Int)
     fun onSafeModeChanged(enabled: Boolean)
     fun onForceAttackTestChanged(enabled: Boolean)
-    fun onShizukuChanged(enabled: Boolean)
     fun onPickModuleZip()
 
     fun onOpenManagerPicker()
@@ -691,32 +686,6 @@ private fun GhostlockDialog(
                     }
                 }
 
-                DialogType.CONFIRM -> {
-                    Text(
-                        text = stringResource(state.dialogMessageRes),
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp),
-                    ) {
-                        TextButton(
-                            modifier = Modifier.weight(1f),
-                            text = stringResource(R.string.cancel),
-                            onClick = actions::onDialogDismiss,
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        TextButton(
-                            modifier = Modifier.weight(1f),
-                            text = stringResource(R.string.w3_shizuku_hint_enable),
-                            colors = ButtonDefaults.textButtonColorsPrimary(),
-                            onClick = { actions.onDialogConfirm("") },
-                        )
-                    }
-                }
 
                 DialogType.NOTICE -> {
                     Text(
@@ -812,10 +781,7 @@ private fun MainContent(
         item(key = "run") {
             RunButton(
                 running = state.running,
-                supported = state.kernelSupported &&
-                        state.executionHasProfile &&
-                        (!state.shizukuEnabled ||
-                                state.shizukuStatus == ShizukuStatus.READY),
+                supported = state.kernelSupported && state.executionHasProfile,
                 profileValid = state.profileInvalidPaths.isEmpty(),
                 labelRes = R.string.action_run,
                 onClick = actions::onRun,
@@ -837,10 +803,7 @@ private fun ControlPanel(
             supported = state.kernelSupported,
             profileAvailable = state.executionHasProfile,
             profileValid = state.profileInvalidPaths.isEmpty(),
-            shizukuEnabled = state.shizukuEnabled,
-            shizukuStatus = state.shizukuStatus,
             onParametersClick = actions::onOpenParameters,
-            onShizukuClick = actions::onStatusClick,
             modifier = Modifier.fillMaxWidth(),
         )
         RunCheckCard(
@@ -895,26 +858,6 @@ private fun ControlPanel(
                 title = stringResource(R.string.safe_mode_label),
                 summary = stringResource(R.string.safe_mode_summary),
             )
-            /* PROFILE-SUGGEST-01: the profile suggestion seeds the toggle but no
-             * longer hides it; an explicit user choice overrides either way. */
-            SwitchPreference(
-                checked = state.shizukuEnabled,
-                onCheckedChange = actions::onShizukuChanged,
-                title = stringResource(R.string.shizuku_label),
-                summary = stringResource(
-                    when {
-                        !state.shizukuEnabled -> R.string.shizuku_summary
-                        state.shizukuStatus == ShizukuStatus.READY -> R.string.shizuku_status_ready
-                        state.shizukuStatus == ShizukuStatus.PERMISSION_REQUIRED ->
-                            R.string.shizuku_status_permission_required
-
-                        state.shizukuStatus == ShizukuStatus.NOT_RUNNING ->
-                            R.string.shizuku_status_not_running
-
-                        else -> R.string.shizuku_status_checking
-                    },
-                ),
-            )
         }
         Card(modifier = modifier.padding(top = 12.dp)) {
             ArrowPreference(
@@ -931,14 +874,10 @@ private fun ActivationStatusCard(
     supported: Boolean,
     profileAvailable: Boolean,
     profileValid: Boolean,
-    shizukuEnabled: Boolean,
-    shizukuStatus: ShizukuStatus,
     onParametersClick: () -> Unit,
-    onShizukuClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val accessReady = !shizukuEnabled || shizukuStatus == ShizukuStatus.READY
-    val ready = supported && profileAvailable && profileValid && accessReady
+    val ready = supported && profileAvailable && profileValid
     val missing = !supported || !profileAvailable
     val (backgroundColor, title, icon) = when {
         ready -> Triple(
@@ -963,26 +902,17 @@ private fun ActivationStatusCard(
                 isSystemInDarkTheme() -> Color(0xFF3E2F1B)
                 else -> Color(0xFFFFF0DB)
             },
-            if (!profileValid) R.string.kernel_profile_invalid else R.string.shizuku_label,
+            R.string.kernel_profile_invalid,
             Icons.Rounded.ErrorOutline,
         )
     }
     val summary = when {
-        ready && shizukuEnabled -> R.string.kernel_profile_ready_shizuku
         ready -> R.string.kernel_profile_ready
         !supported -> R.string.kernel_unsupported_summary
         !profileAvailable -> R.string.kernel_profile_required_summary
-        !profileValid -> R.string.kernel_profile_invalid_summary
-        shizukuStatus == ShizukuStatus.PERMISSION_REQUIRED ->
-            R.string.shizuku_status_permission_required
-
-        else -> R.string.shizuku_status_not_running
+        else -> R.string.kernel_profile_invalid_summary
     }
-    val action = if (supported && profileAvailable && profileValid && !accessReady) {
-        onShizukuClick
-    } else {
-        onParametersClick
-    }
+    val action = onParametersClick
     Card(
         modifier = modifier,
         colors = CardDefaults.defaultColors(color = backgroundColor),
@@ -1070,8 +1000,6 @@ private fun RunCheckCard(
                 val labelRes = when (check.id) {
                     RunCheckIds.KERNEL -> R.string.check_kernel
                     RunCheckIds.PROFILE -> R.string.check_profile
-                    RunCheckIds.SHIZUKU_APP -> R.string.check_shizuku_app
-                    RunCheckIds.SHIZUKU_READY -> R.string.check_shizuku_ready
                     RunCheckIds.KERNELSU_MANAGER -> R.string.check_kernelsu_manager
                     RunCheckIds.ALREADY_ROOTED -> R.string.check_already_rooted
                     else -> R.string.check_kernel

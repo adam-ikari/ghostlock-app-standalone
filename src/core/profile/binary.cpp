@@ -60,7 +60,6 @@ namespace ghostlock::binary_profile {
 
         constexpr Field kMeta[] = {
             PLAIN("kernel_major", meta.kernel_major),
-            PLAIN("recommend_shizuku", meta.recommend_shizuku),
             PLAIN("fallback_route", meta.fallback_route),
             PLAIN("safe_mode", meta.safe_mode),
         };

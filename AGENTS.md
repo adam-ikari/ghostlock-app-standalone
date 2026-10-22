@@ -8,7 +8,7 @@ KernelSU 模块加载。内核按精确 `uname -r` 匹配 HOCON profile，未匹
 
 | 层        | 位置                | 说明                                                                                       |
 | --------- | ------------------- | ------------------------------------------------------------------------------------------ |
-| Android   | `app/`              | Kotlin/Compose UI、HOCON profile 解析/合并/覆盖、Shizuku UserService、日志                 |
+| Android   | `app/`              | Kotlin/Compose UI、HOCON profile 解析/合并/覆盖、进程执行入口、日志                       |
 | Native    | `src/core/`         | C++23 攻击 runtime，产物 `build/native/ghostlock`                                          |
 | Extractor | `tools/extract_rs/` | Rust；boot.img / OTA / URL → `--format conf`（flatten GLK profile）/ `--format json`（v1） |
 

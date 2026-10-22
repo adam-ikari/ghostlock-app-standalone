@@ -21,10 +21,10 @@ import com.ghostlock.app.domain.model.ProfileConfig
 import com.ghostlock.app.domain.model.UserProfileFile
 import com.ghostlock.app.domain.repository.GhostlockRepository
 import com.ghostlock.app.domain.repository.ProfileConfigController
-import com.ghostlock.app.shizuku.LspdModuleStaging
-import com.ghostlock.app.shizuku.ShizukuExploitRunner
+import com.ghostlock.app.runtime.LspdModuleStaging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -52,13 +52,15 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val PrefDebugKernelLogEnabled = "debug_kernel_log_enabled"
         const val PrefDebugProfileOverrides = "debug_profile_overrides"
 
-        /** The one-tap run path needs the separate Shizuku app. */
-        const val ShizukuPackage = "moe.shizuku.privileged.api"
 
         /* Zygisk / LSPosed module zips, shipped as assets: the device cannot
          * reach the release hosts itself. The native root script installs them
          * right after the late-load, in the order that keeps the framework up. */
         const val LspdStackAssetDir = "modules"
+
+        /** Publishing retries while the shared volume is still mounting. */
+        const val PUBLISH_ATTEMPTS = 15
+        const val PUBLISH_RETRY_MS = 1_000L
         const val LspdStackDirectory = "modules"
 
         /* U01-S14: per-run KernelSU log name; the resolved path travels to
@@ -101,17 +103,11 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     private var selectedCpuPair = 0
     private var safeModeEnabled = false
     private var forceAttackTest = false
-    private var shizukuEnabled = false
-    /** True once the user flipped the toggle; only then does it override the
-     * profile suggestion (PROFILE-SUGGEST-01). */
-    private var shizukuPreferenceSet = false
     private var pendingParsedDocument: PendingParsedDocument? = null
-    private val shizukuRunner = ShizukuExploitRunner(appContext)
 
     init {
         buildCpuPairs()
         restoreCpuPair()
-        restoreShizukuPreference()
         restoreForceAttackTest()
         dropLegacyOffsetsCache()
         migrateLegacyOffsetsStore()
@@ -160,12 +156,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override suspend fun snapshot(): KernelSnapshot {
         val release = System.getProperty("os.version", "unknown").orEmpty()
-        /* PROFILE-SUGGEST-01: recommend_shizuku is a suggestion. It seeds the
-         * toggle until the user makes an explicit choice, which then overrides
-         * it in both directions. */
-        val recommendShizuku = release in builtinProfiles.recommendShizuku ||
-            importedOffsetsRecommendShizuku(release)
-        val shizukuActive = if (shizukuPreferenceSet) shizukuEnabled else recommendShizuku
         return KernelSnapshot(
             deviceName = resolveDeviceName(),
             kernelRelease = release,
@@ -176,11 +166,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             selectedCpuPair = selectedCpuPair,
             safeModeEnabled = safeModeEnabled,
             forceAttackTest = forceAttackTest,
-            recommendShizuku = recommendShizuku,
-            shizukuEnabled = shizukuActive,
-            shizukuStatus = if (shizukuActive) shizukuRunner.status()
-            else com.ghostlock.app.domain.model.ShizukuStatus.NOT_REQUIRED,
-            shizukuInstalled = isPackageInstalled(ShizukuPackage),
         )
     }
 
@@ -224,10 +209,34 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
      */
     private suspend fun publishLspdModules(): String? =
         withContext(Dispatchers.IO) {
-            LspdModuleStaging.publish(appContext)
+            /* The external files dir is on the shared volume, which may not be
+             * mounted yet right after the app starts; publishing then fails and
+             * the whole LSPosed stage is silently skipped. Wait for it, and
+             * stop at the first success. */
+            var published: String? = null
+            for (attempt in 0 until PUBLISH_ATTEMPTS) {
+                published = LspdModuleStaging.publish(appContext)
+                if (published != null) break
+                delay(PUBLISH_RETRY_MS)
+            }
+            published
         }
 
-    /** True when the package is installed (Shizuku ships as its own app). */
+    /** Diagnostics for the publish step: where the packages went, and what
+     *  the root script will be pointed at. */
+    private fun lspdPublishDiagnostics(): String {
+        val external = appContext.getExternalFilesDir(null)
+        val dirs = external?.listFiles { file -> file.isDirectory && file.name.startsWith("modules-published") }
+            ?.sortedBy { it.lastModified() }
+            ?.takeLast(3)
+            ?.joinToString("; ") { dir ->
+                val zips = dir.listFiles { f -> f.name.endsWith(".zip") }?.size ?: 0
+                "${dir.name}(zips=$zips)"
+            } ?: "(none)"
+        return "external=${external ?: "null"} dirs=$dirs"
+    }
+
+    /** True when the package is installed (the manager apps ship separately). */
     private fun isPackageInstalled(packageName: String): Boolean = runCatching {
         appContext.packageManager.getPackageInfo(packageName, 0)
         true
@@ -250,16 +259,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         preferences.edit { putBoolean(PrefForceAttackTest, enabled) }
     }
 
-    override fun setShizukuEnabled(enabled: Boolean) {
-        shizukuEnabled = enabled
-        shizukuPreferenceSet = true
-        appContext.getSharedPreferences("ghostlock_prefs", Context.MODE_PRIVATE)
-            .edit {
-                putBoolean("shizuku_enabled", enabled)
-                putBoolean("shizuku_explicit", true)
-            }
-        if (enabled) shizukuRunner.requestPermission()
-    }
 
     override fun selectedManagerPackage(): String? =
         preferences.getString(ManagerScanner.PREF_KEY, null)?.takeIf { it.isNotBlank() }
@@ -471,72 +470,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             runExploitBinary(pair, "libghostlock.so", archivedLog, debugDir, writeSidecar)
         }
 
-    override suspend fun runExploitWithShizuku(pair: CpuPair, onLog: (String) -> Unit): Int {
-        return withDebugAttackLog("shizuku", onLog) { archivedLog, debugDir, writeSidecar ->
-            archivedLog("<s> resolving profile")
-            val release = System.getProperty("os.version", "").orEmpty()
-            val config = profileController.load(release, pair)
-            val profileBlob = profileController.nativeDocument(config)
-            archivedLog(
-                "<s> profile resolved hasProfile=${config.hasProfile} " +
-                    "blob=${profileBlob?.size ?: 0} invalid=${config.invalidPaths.size}",
-            )
-            when {
-                !config.hasProfile || profileBlob == null -> {
-                    archivedLog("<s> error: profile is unavailable for $release")
-                    1
-                }
-
-                config.invalidPaths.isNotEmpty() -> {
-                    archivedLog(
-                        "<s> error: profile has ${config.invalidPaths.size} invalid field(s): " +
-                            config.invalidPaths.take(6).joinToString(),
-                    )
-                    1
-                }
-
-                else -> {
-                    /* Mirror the UserService patch so the dumped blob is the
-                     * effective one native will actually receive. */
-                    val runtimeBlob = if (safeModeEnabled) {
-                        NativeProfileDocument.patchSafeMode(profileBlob) ?: profileBlob
-                    } else {
-                        profileBlob
-                    }
-                    dumpRuntimeProfile(archivedLog, writeSidecar, release, pair, runtimeBlob)
-                    /* The user service runs in the shell domain, so the module
-                     * zips have to be published to a directory it can read
-                     * before the native starts. */
-                    stageLspdStackModules(archivedLog)
-                    val publishedModules = publishLspdModules()
-                    if (publishedModules != null) {
-                        archivedLog("<k> LSPosed component packages published: $publishedModules")
-                    }
-                    archivedLog("<b> starting UserService")
-                    resetRunState()
-                    val code = shizukuRunner.run(
-                        pair, safeModeEnabled, forceAttackTest, profileBlob, debugDir,
-                        selectedManagerPackage(), archivedLog,
-                    ) { step, status ->
-                        if (status == "disabled") clearRunState() else applyRunStatus(step, status)
-                    }
-                    if (code == ShizukuExploitRunner.EXIT_USER_SERVICE_UNAVAILABLE) {
-                        /* The Shizuku helper process could not start at all
-                         * (Shizuku#1198: MediaTek/OEM patches break the
-                         * user-service bootstrap). The direct path needs no
-                         * helper, so fall back to it instead of failing the
-                         * whole run. The direct path runs the native binary in
-                         * the app's own process, so it needs the app uid, not
-                         * the shell uid the user service would have provided. */
-                        archivedLog("<b> Shizuku user service unavailable; falling back to the direct path")
-                        runExploitBinary(pair, "libghostlock.so", archivedLog, debugDir, writeSidecar)
-                    } else {
-                        code
-                    }
-                }
-            }
-        }
-    }
 
     /* --- attack step status ------------------------------------------------
      * The native process reports each step over stdout and waits for an ACK on
@@ -658,11 +591,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         }
     }
 
-    override fun requestShizukuPermission() = shizukuRunner.requestPermission()
-
-    override fun setShizukuStatusListener(listener: (() -> Unit)?) =
-        shizukuRunner.setStatusListener(listener)
-
     private suspend fun runExploitBinary(
         pair: CpuPair,
         binaryName: String,
@@ -682,6 +610,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
              * packages selected the native skips the stack entirely. */
             stageLspdStackModules(onLog)
             val publishedModules = publishLspdModules()
+            onLog("<k> lspd publish: ${lspdPublishDiagnostics()}")
             if (publishedModules != null) {
                 onLog("<k> LSPosed component packages published: $publishedModules")
             }
@@ -763,9 +692,10 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     if (ksud != null) environment()["GHOSTLOCK_KSUD"] = ksud.absolutePath
                     /* Only when the user actually selected component packages:
                      * the native root script then installs the ZygiskNext /
-                     * Vector stack. Leaving this unset keeps the one-tap root
-                     * path free of the system_server restart that can drop the
-                     * device into recovery. */
+                     * Vector stack and restarts zygote so the injection reaches
+                     * system_server. Leaving this unset keeps the one-tap root
+                     * path free of that framework restart, which is what drops
+                     * the device into recovery. */
                     publishedModules?.let { modulesDir ->
                         environment()["GHOSTLOCK_LSPD_MODULES"] = modulesDir
                     }
@@ -983,7 +913,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     }
 
     override fun close() {
-        shizukuRunner.close()
         synchronized(processes) {
             processes.forEach(Process::destroyForcibly)
             processes.clear()
@@ -1043,8 +972,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     private fun importedOffsetsMatch(version: String): Boolean =
         userProfileStore.containsRelease(version)
 
-    private fun importedOffsetsRecommendShizuku(version: String): Boolean =
-        userProfileStore.recommendsShizuku(version)
 
     private fun buildCpuPairs() {
         cpuPairs.clear()
@@ -1069,11 +996,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         if (pair.size == 2) cpuPairs.indexOf(CpuPair(pair[0], pair[1])).takeIf { it >= 0 }?.let { selectedCpuPair = it }
     }
 
-    private fun restoreShizukuPreference() {
-        val prefs = appContext.getSharedPreferences("ghostlock_prefs", Context.MODE_PRIVATE)
-        shizukuPreferenceSet = prefs.getBoolean("shizuku_explicit", false)
-        shizukuEnabled = prefs.getBoolean("shizuku_enabled", false)
-    }
 
     private fun restoreForceAttackTest() {
         forceAttackTest = preferences.getBoolean(PrefForceAttackTest, false)

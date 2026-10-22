@@ -76,7 +76,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.refreshAccessStatus()
+        viewModel.refreshStatus()
     }
 
     private fun handleEffect(effect: GhostlockEffect) {
@@ -117,10 +117,6 @@ class MainActivity : ComponentActivity() {
             } else {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
-
-            GhostlockEffect.OpenShizuku -> packageManager
-                .getLaunchIntentForPackage(SHIZUKU_PACKAGE)
-                ?.let(::startActivity)
         }
     }
 
@@ -151,10 +147,6 @@ class MainActivity : ComponentActivity() {
                     WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
         )
     }
-
-    private companion object {
-        const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
-    }
 }
 
 @Composable
@@ -171,7 +163,6 @@ private fun GhostlockRoute(
         actions = object : GhostlockActions {
             override fun onRun() = viewModel.onRun()
             override fun onProfileInvalid() = viewModel.onProfileInvalid()
-            override fun onStatusClick() = viewModel.onStatusClick()
             override fun onCloseExecutionSheet() = viewModel.onCloseExecutionSheet()
             override fun onCopyLogs() = viewModel.copyLogs()
             override fun onImportOffsetsHocon() = viewModel.importOffsetsHocon()
@@ -186,7 +177,6 @@ private fun GhostlockRoute(
             override fun onForceAttackTestChanged(enabled: Boolean) =
                 viewModel.toggleForceAttackTest(enabled)
 
-            override fun onShizukuChanged(enabled: Boolean) = viewModel.toggleShizuku(enabled)
             override fun onOpenManagerPicker() = viewModel.onOpenManagerPicker()
             override fun onPickModuleZip() = viewModel.onPickModuleZip()
             override fun onCloseManagerPicker() = viewModel.onCloseManagerPicker()

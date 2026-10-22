@@ -6,24 +6,11 @@
 > Root the device first, then follow [MEDIATEK.md](MEDIATEK.md) to obtain the
 > two physical addresses (`kernel_phys_load` / `kernel_phys_offset`).
 
-Rows marked **Shizuku recommended** ship a profile with `recommend_shizuku = 1`.
-The app automatically turns on the home-screen **Run via Shizuku** switch for
-them at every start; you can switch it off for the current session, and while it
-is off the app stops asking for Shizuku until the next start.
-
-Shizuku runs the exploit as the shell user, which has no seccomp filter, so the
-W3 seccomp bypass stage is skipped. To use it:
-
-1. Start Shizuku (for example over ADB) and keep it running.
-2. Tap the status card at the top of the app and grant access when prompted.
-
-Rows without the marker don't turn the switch on automatically, but **you can
-enable it manually on any device**. Running via Shizuku skips the W3 seccomp
-bypass there as well, so it saves time even where it isn't required.
+The app runs the exploit in its own process; no companion app is required.
 
 | Kernel                                                 | Devices                                                          |
 |--------------------------------------------------------|------------------------------------------------------------------|
-| `5.15.41-android13-8-g8dc4c75ab7d8-ab1673212412`       | MEIZU 20 Pro · Shizuku recommended                               |
+| `5.15.41-android13-8-g8dc4c75ab7d8-ab1673212412`       | MEIZU 20 Pro                                                       |
 | `5.15.119-android13-8-g6ff5097ee32a-ab1764665171`      | MEIZU 21 Note                                                    |
 | `5.15.167-android13-8-00017-gb1f32b310a30-ab12826353`  | Red Magic 8 Pro                                                  |
 | `5.15.178-android13-8-00025-g7feb0b0b7cd8-ab14134651`  | Sharp AQUOS R8 SH-R80                                            |
@@ -55,7 +42,7 @@ bypass there as well, so it saves time even where it isn't required.
 | `6.1.162-android14-11-g752d9c17787d-ab15574904`        | Google Pixel 9 Pro / 9 Pro Fold (Tensor G4)                      |
 | `6.1.162-android14-11-g5e8b0cffebd1-ab15202165`        | Google Pixel 9a (Tensor G4)                                      |
 | `6.6.30-android15-8-g54dcbfbef792-ab12368803-4k`       | Red Magic Tablet 3 Pro                                           |
-| `6.6.30-android15-8-g24ffe62b0a0e-abogki387229724-4k`  | vivo X200 Pro · Shizuku recommended                              |
+| `6.6.30-android15-8-g24ffe62b0a0e-abogki387229724-4k`  | vivo X200 Pro                                                      |
 | `6.6.77-android15-8-g4a507830d890-ab13636293-4k`       | Xiaomi Civi 5 Pro, REDMI K90 / 4 Turbo, POCO F7                  |
 | `6.6.77-android15-8-g63ce7556864c-ab13994517-4k`       | Xiaomi 15                                                        |
 | `6.6.77-android15-8-gca30f3b4bef6-abogki440974771-4k`  | Xiaomi 15 Pro, REDMI K80 Pro / K80 Ultra                         |

@@ -67,7 +67,7 @@ See `AGENTS.md` and §8 for commands.
 ### 2.1 Three layers and dependency direction
 
 ```
-app/ (Kotlin, UI/domain/data/shizuku)
+app/ (Kotlin, UI/domain/data/runtime)
   │  ProcessBuilder (not JNI): write GLK1 to stdin, collect logs from stdout/stderr, report the result through the exit code
   ▼
 src/core/ (C++23 executable ELF)     tools/extract_rs/ (Rust offline extractor)
@@ -75,7 +75,7 @@ src/core/ (C++23 executable ELF)     tools/extract_rs/ (Rust offline extractor)
 
 - Cross-layer contracts are limited to processes, files, stdin/stdout, exit codes, and GLK1/HOCON profile text. New cross-layer state must go through
   a profile or file. Do not invent environment variables; see §3.1.
-- Kotlin layers: `ui → domain → data`. Platform I/O is allowed only in `data/`. `shizuku/` is an execution-entry variant,
+- Kotlin layers: `ui → domain → data`. Platform I/O is allowed only in `data/`. `runtime/` holds the execution-entry helpers,
   not a place for business rules.
 - Native namespace layers: `ghostlock::{route,session,memory,attack,race,support,profile}`.
   All includes are relative to `src/core`, as in `#include "route/..."`, so ownership is visible at the call site.

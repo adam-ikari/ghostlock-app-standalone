@@ -311,7 +311,6 @@ pub fn render_conf(input: &ConfInputs<'_>) -> String {
         format!("release = \"{release}\""),
         "schema_version = 1".to_string(),
         format!("kernel_major = {}", major.unwrap_or(0)),
-        "recommend_shizuku = 0".to_string(),
     ];
     lines.push(match input.phys {
         // Decimal only: HOCON has no `0x` literal, and the Kotlin reader
@@ -911,21 +910,7 @@ mod tests {
         let bundled = flatten_conf(&bundled);
 
         assert!(generated.contains_key("route.multicast_waiter.waiter_off"));
-        // The one intentional difference: shizuku defaults to off in generated
-        // confs, the bundled profile recommends it.
-        assert_eq!(
-            generated.get("recommend_shizuku").map(String::as_str),
-            Some("0")
-        );
-        assert_eq!(
-            bundled.get("recommend_shizuku").map(String::as_str),
-            Some("1")
-        );
-
         for key in bundled.keys() {
-            if key == "recommend_shizuku" {
-                continue;
-            }
             assert_eq!(
                 generated.get(key),
                 bundled.get(key),
