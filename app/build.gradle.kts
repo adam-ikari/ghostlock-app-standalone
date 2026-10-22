@@ -66,7 +66,14 @@ android {
     defaultConfig {
         applicationId = "com.ghostlock.app"
         minSdk = 31
-        targetSdk = 37
+        /* Upstream targets 37 (Android 17 preview). A targetSdk newer than the
+         * platform the device runs installs in a restricted state on that
+         * platform: the package stays disabled, its components do not resolve
+         * and no data directory is created (verified on Android 16 / SDK 36:
+         * "Activity class ... does not exist" right after a successful
+         * install). Targeting the platform we ship on keeps the app usable
+         * there; compileSdk stays at 37 so the newer APIs remain available. */
+        targetSdk = 36
         versionCode = gitVersionCode
         versionName = appVersionName
     }

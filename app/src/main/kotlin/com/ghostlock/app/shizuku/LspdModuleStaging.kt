@@ -27,13 +27,20 @@ object LspdModuleStaging {
      */
     private const val PrivateDir = "modules"
 
-    /** Sub-directory of the app's files dir the native root script reads. */
+    /** Sub-directory of the app's external files dir the root script reads. */
     private const val PublishedDir = "modules-published"
 
     /**
-     * Copies the selected component packages next to the app's other runtime
-     * files and returns the directory, or null when there is nothing to
-     * install.
+     * Copies the selected component packages to a directory the root script
+     * can read and returns it, or null when there is nothing to install.
+     *
+     * The packages go to the app's **external** files dir
+     * (`/storage/emulated/0/Android/data/<pkg>/files/...`), not its private
+     * one: the module install runs in the KernelSU (ksu) domain, and that
+     * domain cannot read `/data/data/<pkg>/` (the app's private dir), while
+     * the shared storage path is readable from every domain. The app can write
+     * both, so the app-private dir stays the staging area and the external
+     * one is what the native side is pointed at.
      *
      * Returns null when the user selected no packages, or when the copy
      * failed — in both cases the native must not touch the LSPosed stack.
@@ -45,7 +52,8 @@ object LspdModuleStaging {
             .orEmpty()
         if (zips.isEmpty()) return null
 
-        val published = File(context.filesDir, PublishedDir)
+        val external = context.getExternalFilesDir(null) ?: return null
+        val published = File(external, PublishedDir)
         if (!published.isDirectory && !published.mkdirs()) return null
         // Stale packages from an earlier run would be installed again.
         published.listFiles()?.forEach { it.delete() }
@@ -72,7 +80,8 @@ object LspdModuleStaging {
         val hasZip = private.listFiles { file -> file.isFile && file.name.endsWith(".zip") }
             ?.isNotEmpty() == true
         if (!hasZip) return null
-        val published = File(context.filesDir, PublishedDir)
+        val external = context.getExternalFilesDir(null) ?: return null
+        val published = File(external, PublishedDir)
         if (!published.isDirectory) return null
         val hasPublished = published.listFiles { file -> file.isFile && file.name.endsWith(".zip") }
             ?.isNotEmpty() == true
