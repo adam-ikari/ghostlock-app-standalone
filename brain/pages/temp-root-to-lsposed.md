@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-22T03:31:57"
+updated: "2026-10-22T05:25:14"
 ---
 
 <!-- compiled_truth -->
@@ -110,4 +110,10 @@ graph LR
   kind: evidence
   summary: "2026-10-22 真机全链路验证通过：利用一次命中拿 root（tcp route calls=1 success=1）→ KernelSU late-load → 装 ZygiskNext+Vector → 杀 zygote64 让 ZygiskNext injector 接管（inject zygote succeed，新 zygote 带 -Xzygote）→ zygote_states:1 / modules64:1,zygisk_vector → Vector daemon 起来 → cli status 报 Framework 2.2 / API 102 / Enabled Modules 12。adb shell 与 Shizuku UserService 执行环境等价（uid 2000 / shell 域 / 无 seccomp），故 LSPosed 栈改走 adb 路线，手机不必装 Shizuku"
   source: "真机验证（Titan 2 / Android 16 / MediaTek）"
+  affects: [temp-root-to-lsposed, porting-blockers]
+
+- time: 2026-10-22T05:25:14
+  kind: decision
+  summary: "app 路线定为不依赖 Shizuku：adb shell 与 Shizuku UserService 是同一执行环境（uid 2000 / shell 域 / 无 seccomp），而 Shizuku 官方 13.6.0 在 MediaTek 上 UserService 必崩（#1198）。app 侧组件包改发布到 external files dir（ksu 域可读，app 私有目录读不到），native root script 用 su 进 ksu 域装模块（shell 域写不了 modules_update），组件包路径由 RuntimeConfig 注入脚本正文（root script 用 execl 执行、不继承环境变量）。另：kernelsu 已加载但 su 未挂进 namespace 时必须补跑 late-load"
+  source: "2026-10-22 真机验证"
   affects: [temp-root-to-lsposed, porting-blockers]
