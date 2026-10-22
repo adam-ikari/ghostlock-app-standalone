@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, blockers, open-questions]
 created: "2026-10-21T03:35:43"
-updated: "2026-10-22T17:54:21"
+updated: "2026-10-22T18:14:14"
 ---
 
 <!-- compiled_truth -->
@@ -147,3 +147,9 @@ updated: "2026-10-22T17:54:21"
   summary: "B9 的处置已定：先跑 P1（把需要 exec 的步骤放进 permissive 窗口，late-load 挪到最后），不先动攻击关键路径。当前对外口径是「CLI 路线可用、app 路线在修」，见 [[app-route-decisions]]"
   source: brain/app-route-decisions.md
   affects: [porting-blockers]
+
+- time: 2026-10-22T18:14:14
+  kind: evidence
+  summary: "无 PC 交付通道已通：手机浏览器可直接从隧道 https://essentials-compiler-email-asin.trycloudflare.com/ 下 APK（593 试验版），日志回传走 /upload.html（本机 127.0.0.1:8477 上的 dist-server.py，POST /upload 存到 dist/uploads/）。往返各验证过一次：GET 593 返回 200，POST 一个文件后在 dist/uploads/ 出现"
+  source: "本机验证 2026-10-22"
+  affects: [app-route-decisions]

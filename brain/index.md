@@ -1,6 +1,6 @@
 # Brain Index
 
-_Auto-generated. Last updated 2026-10-22T09:54:21.285Z._
+_Auto-generated. Last updated 2026-10-22T10:14:14.982Z._
 
 - [app-route-decisions](pages/app-route-decisions.md) — category: project | tags: [lsposed, kernelsu, selinux, app-route] | ## 决策（2026-10-22，约束来自真机取证）
 - [ghostlock-cve-2026-43499](pages/ghostlock-cve-2026-43499.md) — category: concept | tags: [ghostlock, exploit, android] | ## 漏洞本体

@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [lsposed, kernelsu, selinux, app-route]
 created: "2026-10-22T17:53:57"
-updated: "2026-10-22T17:54:10"
+updated: "2026-10-22T18:14:14"
 ---
 
 <!-- compiled_truth -->
@@ -74,3 +74,15 @@ app 路线一律标注为「在修」。分发 README、docs、app 内表述都�
   summary: Rewrote compiled_truth to the new best understanding
   source: "docs/titan2-app-route-domain-2026-10-22.md；artifacts/2026-10-22-device-dump"
   affects: [app-route-decisions]
+
+- time: 2026-10-22T18:00:29
+  kind: decision
+  summary: "D7：无 PC 是硬约束（手机在用户手上，宿主机不接手机）。因此：app 路线是唯一交付形态，CLI/adb 路线只能当诊断工具或临时方案；任何 app 侧改动都必须在手机上自助完成验证（app 内日志 + 导出到 Download/），不能依赖 adb 读日志；未验证的构建不得标成可用。同时保留「inject_state:1 + modules64 含 zygisk_vector 才允许杀 zygote」的硬前置——没有 PC 时设备进 recovery 就等于不可恢复"
+  source: "用户当场说明（2026-10-22）：手机在我手上，没有 PC"
+  affects: [app-route-decisions, porting-blockers]
+
+- time: 2026-10-22T18:14:14
+  kind: decision
+  summary: "D1 已落地为代码：root 脚本在 SELINUX_FIXUP=0（= 用户选了组件包）时按 P1 顺序跑——跳过启动段的 late-load，$SU 指向本地包装脚本 /data/local/tmp/.ghostlock_run.sh（exec sh -c \"$2\"）从而不切域、不碰 su，栈内第二次 late-load 也跳过，唯一一次 late-load 放在整段栈之后。已安装 ksud 缺失时退回 app 包里的 libksud.so。构建 593（sha256 885148e3…），本机证据：sh -n 通过 + 抽脚本用桩整轮跑出 D1 顺序 + cmp_disasm 8 函数与基线 592 指令流一致（仅地址布局差，同源重建与基线 byte-identical 作对照）。真机门禁待用户手机执行"
+  source: "ghostlock-app 566a8f4；docs/development/plan-app-route-stability-2026-10-22.md 批次记录"
+  affects: [app-route-decisions, temp-root-to-lsposed]
