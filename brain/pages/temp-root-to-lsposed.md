@@ -5,7 +5,7 @@ category: concept
 status: active
 tags: [lsposed, kernelsu, zygisk, temp-root]
 created: "2026-10-21T03:35:20"
-updated: "2026-10-21T11:01:43"
+updated: "2026-10-22T00:38:59"
 ---
 
 <!-- compiled_truth -->
@@ -98,4 +98,10 @@ graph LR
   kind: note
   summary: "未解决：模块 hook 生效、cli status 正常，但 Vector 管理器首页仍显示「异常」(Mismatched)；已排除 daemon 挂/未注入/模块未加载/纯网络/管理器代次不一致（重装后仍异常），判断为管理器状态判定/状态通知通道的 cosmetic 问题"
   source: "真机 18:47 复查"
+  affects: [temp-root-to-lsposed]
+
+- time: 2026-10-22T00:38:59
+  kind: evidence
+  summary: "adb shell 与 Shizuku UserService 执行环境等价（uid 2000 / u:r:shell:s0 / 无 seccomp），native 里有 'no app seccomp filter (adb/shell flow); skipping W3' 的对应分支。因此利用阶段不需要 Shizuku：scripts/run-exploit.sh（adb 跑利用）+ scripts/start-lsposed.sh（root 后用 root 权限跑脚本装模块起 LSPosed）。Shizuku 在本机（MediaTek）反而是坏的（#1198）"
+  source: "native 源码 + 真机验证路线"
   affects: [temp-root-to-lsposed]

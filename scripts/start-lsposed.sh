@@ -8,17 +8,31 @@
 #     `su -c id -u` 应返回 0。
 #   - module-dir 里放两个 zip：zygisknext.zip、vector.zip（默认 $ROOT/artifacts/modules）。
 #
-# 本脚本的命令序列与 docs/titan2-ondevice-flow.md 里**真机验证过**的流程逐条一致：
-#   ① KernelSU 进内存（利用的副产物）→ shell 用户拿到 su
-#   ② su 域：先删旧模块目录，再逐个装模块（用已安装那份 /data/adb/ksu/bin/ksud）
-#   ③ su 域：再 late-load 一次（apply 模块 + 跑 stage 脚本）
-#   ④ su 域：起 ZygiskNext 守护进程 → 它把注入点挂进 zygote
-#   ⑤ 等 zygote 真的挂上（znctl status → zygote_states:1）
-#   ⑥ 再等 60 秒让注入稳定，然后才起 Vector daemon
-#      （它靠重启 system_server 注入服务；注入没稳就重启 → framework 起不来
-#        → rescue party → 进 recovery。recovery 里 adbd 关着，只能长按电源键。）
+# ── 完整时序（2026-10-22 在 Unihertz Titan 2 / Android 16 上真机验证通过）──
 #
-# 顺序错一步就会掉进 recovery，**不要改这个顺序**。
+#   ① 装模块（su 域，用**已安装那份** /data/adb/ksu/bin/ksud；
+#      装之前先删旧模块目录，旧目录残留会让 install 报
+#      "i/o error: No such file or directory"）
+#   ② late-load 一次 → KernelSU 进内存，shell 用户拿到 su，
+#      同时跑各模块的 post-fs-data.sh（生成 /data/adb/zygisksu/modules_info）
+#   ③ 杀掉 zygote64 → init 重启它 → ZygiskNext 的 injector 接管新 zygote
+#      （新 zygote 带 -Xzygote 参数，且 Vector 的 zygisk 模块被 preload）
+#      **必须重启 zygote**：模块是在 zygote 启动那一刻被注入的，
+#      运行时装模块不会影响已经跑着的 zygote。
+#   ④ 等 60 秒让注入稳定（不等 → Vector daemon 会重启 system_server，
+#      framework 起来一半挂掉 → rescue party → recovery）
+#   ⑤ 起 Vector daemon（**必须用绝对路径**！）
+#
+# ── 三个踩过的坑（都写在下面脚本里了）──
+#   1. `daemon` 脚本内部用 `dir="${0%/*}"` 定位自己的目录，**要求 $0 是绝对路径**。
+#      用相对路径（`cd $DIR && ./daemon`）会得到 dir="."，于是
+#      -Djava.class.path=daemon.apk 是相对路径 →
+#      UnsatisfiedLinkError: Expecting an absolute path of the library
+#      → daemon 静默退出。
+#   2. toybox 的 unshare **不支持 --propagation slave**（Vector 自带的 service.sh
+#      用的就是它）→ 只能退化成 `unshare -m`。
+#   3. zygisksu 模块目录里的 `disable` 标记会让它整个不加载
+#      （znctl status 显示 modules64:1 但 zn 模块为 0）→ 装完必须确认没有 disable。
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
@@ -31,6 +45,8 @@ SERIAL=${SERIAL:-}
 DEV_MODULES=/data/local/tmp/modules
 KSU_KSUD=/data/adb/ksu/bin/ksud
 ZNCTL=/data/adb/ksu/bin/znctl
+VECTOR_DIR=/data/adb/modules/zygisk_vector
+KSU_KMI=android14-6.1
 
 sh_() { "$ADB" shell "$@"; }
 # su 域执行：模块安装必须走 su（root 脚本所在域写不了 /data/adb/modules_update）。
@@ -56,7 +72,7 @@ for z in zygisknext.zip vector.zip; do
   "$ADB" push "$MODDIR/$z" "$DEV_MODULES/$z" >/dev/null
 done
 
-echo "=== ② 装模块（su 域；先删旧目录）==="
+echo "=== ① 装模块（su 域；先删旧目录）==="
 # 旧目录残留会让 ksud module install 报 "i/o error: No such file or directory"。
 su_ "rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu"
 for z in zygisknext.zip vector.zip; do
@@ -64,16 +80,33 @@ for z in zygisknext.zip vector.zip; do
   su_ "$KSU_KSUD module install $DEV_MODULES/$z"
 done
 
-echo "=== ③ 再 late-load 一次（apply 模块 + 跑 stage）==="
-su_ "$KSU_KSUD late-load --kmi android14-6.1 --allow-shell"
+echo "=== 检查 disable 标记（坑 3）==="
+for m in zygisksu zygisk_vector; do
+  if su_ "test -f /data/adb/modules/$m/disable" 2>/dev/null | grep -q .; then
+    echo "  移除 $m 的 disable 标记"
+    su_ "rm -f /data/adb/modules/$m/disable"
+  fi
+done
 
-echo "=== ④ 起 ZygiskNext 守护进程 ==="
-su_ "nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &"
+echo "=== ② late-load（apply 模块 + 跑 post-fs-data）==="
+su_ "$KSU_KSUD late-load --kmi $KSU_KMI --allow-shell"
+sleep 8
 
-echo "=== ⑤ 等 zygote 挂上（最多 60s）==="
+echo "=== ③ 重启 zygote（让 ZygiskNext 注入新 zygote）==="
+# 模块是在 zygote 启动那一刻被 preload 的；不重启 zygote 就永远注不进。
+OLD_ZYGOTE=$(sh_ "pidof zygote64" 2>/dev/null | tr -d '\r' | awk '{print $1}')
+if [ -n "$OLD_ZYGOTE" ]; then
+  echo "  杀 zygote64 pid=$OLD_ZYGOTE（init 会重启它，webview_zygote 是它的子进程）"
+  su_ "kill -9 $OLD_ZYGOTE"
+else
+  echo "  zygote64 不在？直接继续"
+fi
+
+echo "  等 zygote 挂上（最多 90s）==="
 ZGONE=0
-for i in $(seq 1 60); do
-  if su_ "$ZNCTL status" 2>/dev/null | grep -q 'zygote_states:1'; then
+for i in $(seq 1 90); do
+  OUT=$(su_ "$ZNCTL status" 2>/dev/null | tr -d '\r')
+  if echo "$OUT" | grep -q 'zygote_states:1'; then
     ZGONE=1
     echo "  zygote 已挂上（${i}s）"
     break
@@ -82,22 +115,33 @@ for i in $(seq 1 60); do
 done
 if [ "$ZGONE" != "1" ]; then
   echo "!! zygote 没挂上，**不**起 Vector daemon（起了会进 recovery）" >&2
-  echo "   查 $DEV_MODULES/pfsd.log 与 ksud 日志" >&2
+  echo "   查 ksud post-fs-data 的日志与 znctl status" >&2
+  exit 1
+fi
+# Vector 的 zygisk 模块也要在模块列表里（modules64:1,zygisk_vector）
+MODS=$(su_ "$ZNCTL status" 2>/dev/null | tr -d '\r' | grep '^modules64:' | head -1)
+echo "  $MODS"
+if ! echo "$MODS" | grep -q 'zygisk_vector'; then
+  echo "!! zygisk 模块没进列表（$MODS），Vector daemon 起不来" >&2
   exit 1
 fi
 
-echo "=== ⑥ 等 60 秒让注入稳定 ==="
+echo "=== ④ 等 60 秒让注入稳定 ==="
 # 少了这 60 秒：Vector daemon 会重启 system_server，framework 起来一半挂掉 →
 # rescue party → recovery（我们 3 次里 2 次栽在这）。
 sleep 60
 
-echo "=== 起 Vector daemon（它会重启一次 system_server）==="
-su_ "cd /data/adb/modules/zygisk_vector && (./daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &)"
-sleep 8
+echo "=== ⑤ 起 Vector daemon（绝对路径，坑 1）==="
+# 必须绝对路径：daemon 脚本用 ${0%/*} 定位自己，相对路径会让
+# -Djava.class.path=daemon.apk 变成相对路径 → UnsatisfiedLinkError → 静默退出。
+su_ "unshare -m $VECTOR_DIR/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &"
+# toybox 的 unshare 不支持 --propagation slave（Vector 自带 service.sh 用的就是它），
+# 退化成 -m 即可（坑 2）。
+sleep 20
 
 echo "=== 验证 ==="
-su_ "/data/adb/modules/zygisk_vector/cli status" || true
-su_ "$ZNCTL status" || true
+su_ "$VECTOR_DIR/cli status" || true
+su_ "$ZNCTL status" | head -12 || true
 
 cat <<'EOF'
 

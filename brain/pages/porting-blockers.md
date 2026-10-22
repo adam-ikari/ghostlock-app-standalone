@@ -5,7 +5,7 @@ category: project
 status: active
 tags: [titan2, ghostlock, blockers, open-questions]
 created: "2026-10-21T03:35:43"
-updated: "2026-10-21T15:06:25"
+updated: "2026-10-22T00:38:43"
 ---
 
 <!-- compiled_truth -->
@@ -123,3 +123,9 @@ updated: "2026-10-21T15:06:25"
   summary: "B7（新增）：官方 Shizuku 13.6.0 在本机（MediaTek）上 UserService 起不来 —— 上游 issue RikkaApps/Shizuku#1198 的复现设备就是 Unihertz Titan 2 / Android 16 / Shizuku 13.6.0 / UID 2000。OEM 补丁让 makeApplicationInner() 解引用为 null 的 Application.getProcessName() → 辅助进程 NPE 崩溃，bindUserService 永不回调。app 侧已改：超时 3s→10s、超时不再 remove=true 杀进程、UserService 不可用时自动回退直连路径；Shizuku 侧换 thedjchi 分支"
   source: "app 日志 + 上游 issue #1198"
   affects: [porting-blockers, titan2-device]
+
+- time: 2026-10-22T00:38:43
+  kind: reversal
+  summary: "B8（新增并解除）：v1.2(586) 内置的 native（479cf57）跑一键 root 把设备带进 recovery —— 根因是该版 root 脚本相对真机验证过的手写流程有四处偏离（多一次 late-load、rm -rf 放进循环、没走 su 域、路径没引号），且「等 60 秒再起 Vector daemon」的保护被这些偏离破坏。教训：review-2026-10-21.md 已写明「同步后要重跑门禁」，我跳过门禁就发了版。已修：v1.2(587) 逐条对齐手写流程 + LSPosed 段改为仅在用户选了组件包时才执行"
+  source: "真机事故 + 桩环境全流程验证"
+  affects: [porting-blockers]
