@@ -56,12 +56,23 @@ interface GhostlockRepository {
     /**
      * Copies a picked module zip into the runtime home's modules/ directory.
      *
-     * The app never ships the Zygisk / LSPosed packages itself: both are
-     * GPL-3.0, and this app is Apache-2.0. The user picks the zips (from the
-     * official releases) and the native root script installs them.
+     * The app never ships the Zygisk / LSPosed packages itself: ZygiskNext has
+     * been "all rights reserved" since v4-0.9.2 and its README forbids
+     * redistribution, while Vector is GPL-3.0 and this app is Apache-2.0. The
+     * user picks the zips (or fetches them, see below) and the native root
+     * script installs them.
      */
     suspend fun stageModuleZip(uri: String, name: String): String =
         cacheDocument(uri, name)
+
+    /**
+     * Downloads both component packages from the releases their authors publish
+     * into the module staging directory. Returns the labels that failed.
+     *
+     * Fetching is not redistribution: the bytes come from the rights holder to
+     * the user's own device.
+     */
+    suspend fun fetchModulePackages(onLog: (String) -> Unit): List<String>
 
     suspend fun publishOffsets(candidate: OffsetCandidate): String
 

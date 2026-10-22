@@ -849,6 +849,32 @@ class GhostlockViewModel(
     fun onPickModuleZip() = send(GhostlockEffect.PickDocument(DocumentRequest.ModuleZip))
 
     /**
+     * Fetches the component packages from their upstream releases.
+     *
+     * ZygiskNext cannot be bundled (all rights reserved since v4-0.9.2, "no
+     * redistribution"), so the app downloads the release the author publishes
+     * instead of carrying it. After this succeeds the run needs no further
+     * setup besides tapping 执行.
+     */
+    fun onFetchModuleZips() {
+        viewModelScope.launch(Dispatchers.IO) {
+            appendLog("component packages: fetching from upstream releases")
+            val failed = runCatching { repository.fetchModulePackages { appendLog(it) } }
+                .getOrElse { error ->
+                    appendLog("component packages: ${error.message}")
+                    listOf("all")
+                }
+            appendLog(
+                if (failed.isEmpty()) {
+                    "component packages: ready — pick nothing, just run"
+                } else {
+                    "component packages: failed ${failed.joinToString()}"
+                },
+            )
+        }
+    }
+
+    /**
      * The native pre-attack check skips the exploit when a KernelSU module is
      * already loaded; that line is the only reliable "already rooted" signal
      * the app can see without a shell, so it is folded into the checks.

@@ -21,6 +21,7 @@ import com.ghostlock.app.domain.model.ProfileConfig
 import com.ghostlock.app.domain.model.UserProfileFile
 import com.ghostlock.app.domain.repository.GhostlockRepository
 import com.ghostlock.app.domain.repository.ProfileConfigController
+import com.ghostlock.app.runtime.ComponentFetcher
 import com.ghostlock.app.runtime.LspdModuleStaging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -743,6 +744,27 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         if (!dir.isDirectory) dir.mkdirs()
         return cacheDocument(uri, "$LspdStackDirectory/$name")
     }
+
+    /**
+     * Downloads ZygiskNext / Vector from their upstream releases.
+     *
+     * Each package is verified (module.prop id + size) before it replaces the
+     * copy on disk, so a failed download leaves a previously working package
+     * untouched. Returned labels are the ones that failed.
+     */
+    override suspend fun fetchModulePackages(onLog: (String) -> Unit): List<String> =
+        withContext(Dispatchers.IO) {
+            val failed = mutableListOf<String>()
+            for (component in ComponentFetcher.Defaults) {
+                val ok = runCatching { ComponentFetcher.fetch(appContext, component, onLog) }
+                    .getOrElse { error ->
+                        onLog("${component.label}: fetch failed (${error.message})")
+                        false
+                    }
+                if (!ok) failed += component.label
+            }
+            failed
+        }
 
     override suspend fun cacheDocument(uri: String, fileName: String): String {
         val target = File(filesDir, fileName)

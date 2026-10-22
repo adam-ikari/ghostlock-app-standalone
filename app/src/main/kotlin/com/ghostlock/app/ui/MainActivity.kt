@@ -179,6 +179,7 @@ private fun GhostlockRoute(
 
             override fun onOpenManagerPicker() = viewModel.onOpenManagerPicker()
             override fun onPickModuleZip() = viewModel.onPickModuleZip()
+            override fun onFetchModuleZips() = viewModel.onFetchModuleZips()
             override fun onCloseManagerPicker() = viewModel.onCloseManagerPicker()
             override fun onManagerSelected(pkg: String?) = viewModel.onManagerSelected(pkg)
             override fun onDialogItemSelected(index: Int) = viewModel.onDialogItemSelected(index)

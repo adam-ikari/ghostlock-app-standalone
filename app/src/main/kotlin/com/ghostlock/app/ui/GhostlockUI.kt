@@ -197,6 +197,7 @@ interface GhostlockActions {
     fun onSafeModeChanged(enabled: Boolean)
     fun onForceAttackTestChanged(enabled: Boolean)
     fun onPickModuleZip()
+    fun onFetchModuleZips()
 
     fun onOpenManagerPicker()
     fun onCloseManagerPicker()
@@ -847,6 +848,11 @@ private fun ControlPanel(
                     onSelectedIndexChange = actions::onCpuPairSelected,
                 )
             }
+            ArrowPreference(
+                title = stringResource(R.string.module_zips_fetch_label),
+                summary = stringResource(R.string.module_zips_fetch_summary),
+                onClick = actions::onFetchModuleZips,
+            )
             ArrowPreference(
                 title = stringResource(R.string.module_zips_label),
                 summary = stringResource(R.string.module_zips_summary),
