@@ -96,6 +96,15 @@ interface GhostlockRepository {
      */
     suspend fun detectComponents(): List<ComponentDetector.Status>
 
+    /**
+     * Whether the device already holds root right now.
+     *
+     * This chain grants *temporary* root and refuses to start when a persistent
+     * one is present, because the KernelSU module it would load is already
+     * loaded. The probe prefers `/proc/modules` and falls back to `su -c 'id -u'`.
+     */
+    suspend fun deviceHasRoot(): Boolean
+
     fun downloadMirror(): String
 
     fun setDownloadMirror(prefix: String)

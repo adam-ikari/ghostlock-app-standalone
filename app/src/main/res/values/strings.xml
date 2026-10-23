@@ -63,6 +63,8 @@
     <string name="run_checks_title">Pre-flight checks</string>
     <string name="run_checks_summary">Everything the one-tap run needs: the kernel, the profile, and the separate apps it relies on.</string>
     <string name="run_checks_blocked">%1$d blocking check(s) not satisfied — the run is disabled.</string>
+    <string name="run_checks_all_ok">%1$d checks passed</string>
+    <string name="run_blocked_check">A required pre-flight check failed — see the list above</string>
     <string name="check_state_ok">OK</string>
     <string name="check_state_blocked">Required — the run cannot start yet</string>
     <string name="check_state_optional">Optional — the run still works, without module loading</string>
@@ -101,6 +103,9 @@
     <string name="module_fetch_kernelsu_summary">Downloads the upstream APK and opens the installer; the root script takes libksud.so out of it</string>
     <string name="module_fetch_kernelsu_missing">Downloaded APK is gone</string>
     <string name="module_fetch_kernelsu_no_installer">No package installer accepted the APK</string>
+    <string name="module_fetch_started">Downloading…</string>
+    <string name="module_fetch_done">Downloaded</string>
+    <string name="module_fetch_failed">Download failed — see the log</string>
     <string name="component_detect_label">Component check</string>
     <string name="component_detect_summary">Checks staged module packages, an installed manager, and a loaded KernelSU module</string>
     <string name="component_detect_action">Check</string>

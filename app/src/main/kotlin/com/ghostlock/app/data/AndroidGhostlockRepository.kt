@@ -762,6 +762,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             ComponentDetector.detectAll(appContext, appContext.packageManager, appContext.packageName)
         }
 
+    override suspend fun deviceHasRoot(): Boolean =
+        withContext(Dispatchers.IO) { ComponentDetector.moduleActive() }
+
     /** Reverse-proxy prefix used for component downloads; empty means direct. */
     override fun downloadMirror(): String =
         appContext.getSharedPreferences("ghostlock_prefs", Context.MODE_PRIVATE)

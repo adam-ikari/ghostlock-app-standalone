@@ -904,6 +904,7 @@ class GhostlockViewModel(
     fun onFetchKernelSuManager() {
         viewModelScope.launch(Dispatchers.IO) {
             appendLog("KernelSU manager: fetching from the upstream release")
+            send(GhostlockEffect.Toast(R.string.module_fetch_started))
             val path = runCatching { repository.fetchKernelSuManager { appendLog(it) } }
                 .getOrElse { error ->
                     appendLog("KernelSU manager: ${error.message}")
@@ -911,6 +912,7 @@ class GhostlockViewModel(
                 }
             if (path == null) {
                 appendLog("KernelSU manager: failed (see the lines above)")
+                send(GhostlockEffect.Toast(R.string.module_fetch_failed))
             } else {
                 send(GhostlockEffect.InstallApk(path))
             }
@@ -929,6 +931,7 @@ class GhostlockViewModel(
     fun onFetchModulePackage(key: String) {
         viewModelScope.launch(Dispatchers.IO) {
             appendLog("component package '$key': fetching from upstream release")
+            send(GhostlockEffect.Toast(R.string.module_fetch_started))
             val ok = runCatching { repository.fetchModulePackage(key) { appendLog(it) } }
                 .getOrElse { error ->
                     appendLog("component package '$key': ${error.message}")
@@ -937,6 +940,11 @@ class GhostlockViewModel(
             appendLog(
                 if (ok) "component package '$key': ready — pick nothing, just run"
                 else "component package '$key': failed (see the lines above)",
+            )
+            send(
+                GhostlockEffect.Toast(
+                    if (ok) R.string.module_fetch_done else R.string.module_fetch_failed,
+                ),
             )
         }
     }
@@ -987,6 +995,7 @@ class GhostlockViewModel(
     fun onProfileInvalid() {
         val state = state.value
         val messageRes = when {
+            state.runChecks.any { !it.ok && it.blocking } -> R.string.run_blocked_check
             !state.executionHasProfile -> R.string.run_blocked_no_profile
             else -> R.string.profile_invalid
         }
@@ -996,6 +1005,15 @@ class GhostlockViewModel(
 
     private fun runExploit() {
         val snapshot = kernelSnapshot ?: return
+        /* Guard in the VM as well: the button is the only caller today, but a
+           persistent root makes the chain a no-op, so never start it. */
+        if (alreadyRooted) {
+            if (beginOperation()) {
+                appendLog("result: device already has root — the chain is temporary root only")
+                endOperation()
+            }
+            return
+        }
         if (!snapshot.kernelSupported) {
             if (beginOperation()) {
                 appendLog("result: exploit chain unsupported by this kernel")
@@ -1196,6 +1214,11 @@ class GhostlockViewModel(
             runCatching { profileController.load(snapshot.kernelRelease, pair) }.getOrNull()
         }
         val managers = withContext(Dispatchers.IO) { repository.installedManagers() }
+        /* Probe the root state directly: the native log line only appears once
+           the exploit has already started, so it cannot gate the button. */
+        alreadyRooted = withContext(Dispatchers.IO) {
+            runCatching { repository.deviceHasRoot() }.getOrDefault(false)
+        }
         kernelSnapshot = snapshot
         mutableState.update {
             it.copy(
@@ -1259,7 +1282,10 @@ class GhostlockViewModel(
             com.ghostlock.app.domain.model.RunCheck(
                 id = RunCheckIds.ALREADY_ROOTED,
                 ok = !alreadyRooted,
-                blocking = false,
+                /* Blocking: this chain grants temporary root and the native
+                   chain bails out once a persistent root is present, so the run
+                   would do nothing. Gate the button instead of failing later. */
+                blocking = true,
             ),
         )
     }

@@ -800,17 +800,6 @@ private fun MainContent(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        item(key = "run") {
-            RunButton(
-                running = state.running,
-                supported = state.kernelSupported && state.executionHasProfile,
-                profileValid = state.profileInvalidPaths.isEmpty(),
-                labelRes = R.string.action_run,
-                onClick = actions::onRun,
-                onBlockedClick = actions::onProfileInvalid,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
     }
 }
 
@@ -828,16 +817,18 @@ private fun ControlPanel(
             onParametersClick = actions::onOpenParameters,
             modifier = Modifier.fillMaxWidth(),
         )
-        RunCheckCard(
-            checks = state.runChecks,
+        RunButton(
+            running = state.running,
+            blocked = state.runChecks.any { !it.ok && it.blocking },
+            labelRes = R.string.action_run,
+            onClick = actions::onRun,
+            onBlockedClick = actions::onProfileInvalid,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 12.dp),
         )
-        DeviceInfoCard(
-            deviceName = state.deviceName,
-            socName = state.socName,
-            kernelRelease = state.kernelRelease,
+        RunCheckCard(
+            checks = state.runChecks,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 12.dp),
@@ -914,6 +905,14 @@ private fun ControlPanel(
                 onClick = actions::onOpenAdvanced,
             )
         }
+        DeviceInfoCard(
+            deviceName = state.deviceName,
+            socName = state.socName,
+            kernelRelease = state.kernelRelease,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+        )
     }
 }
 
@@ -1140,18 +1139,39 @@ private fun RunCheckCard(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = stringResource(R.string.run_checks_title),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.run_checks_summary),
-                fontSize = 13.sp,
-                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.68f),
-            )
-            checks.forEach { check ->
+            val allOk = blockingFailed == 0 && checks.all { it.ok }
+            if (allOk) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircleOutline,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = stringResource(R.string.run_checks_all_ok, checks.size),
+                        fontSize = 15.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                }
+            } else {
+                Text(
+                    text = stringResource(R.string.run_checks_title),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.run_checks_summary),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                )
+            }
+            if (!allOk) checks.forEach { check ->
                 val labelRes = when (check.id) {
                     RunCheckIds.KERNEL -> R.string.check_kernel
                     RunCheckIds.PROFILE -> R.string.check_profile
@@ -1309,8 +1329,7 @@ internal fun isFieldInputInvalid(text: String): Boolean = text.trim().toLongOrNu
 @Composable
 private fun RunButton(
     running: Boolean,
-    supported: Boolean,
-    profileValid: Boolean,
+    blocked: Boolean,
     labelRes: Int,
     onClick: () -> Unit,
     onBlockedClick: () -> Unit,
@@ -1319,14 +1338,17 @@ private fun RunButton(
     Box(modifier = modifier) {
         TextButton(
             text = stringResource(if (running) R.string.action_running else labelRes),
-            enabled = supported && profileValid && !running,
-            colors = ButtonDefaults.textButtonColorsPrimary(),
+            enabled = !blocked && !running,
+            colors = ButtonDefaults.textButtonColorsPrimary(
+                disabledColor = MiuixTheme.colorScheme.disabledPrimaryButton,
+                disabledTextColor = MiuixTheme.colorScheme.disabledOnPrimaryButton,
+            ),
             onClick = onClick,
             modifier = Modifier.fillMaxWidth(),
         )
         /* A disabled TextButton consumes no pointer input, so this overlay
          * explains why the run is blocked. */
-        if (!running && (!supported || !profileValid)) {
+        if (!running && blocked) {
             Box(
                 modifier = Modifier
                     .matchParentSize()

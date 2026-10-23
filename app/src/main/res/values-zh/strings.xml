@@ -63,6 +63,8 @@
     <string name="run_checks_title">运行前检查</string>
     <string name="run_checks_summary">一键临时 root 需要的东西：内核、profile，以及它依赖的独立 app。</string>
     <string name="run_checks_blocked">有 %1$d 项必须条件未满足，暂时不能执行。</string>
+    <string name="run_checks_all_ok">%1$d 项检查全部通过</string>
+    <string name="run_blocked_check">运行前检查有必须项未通过 —— 见上方列表</string>
     <string name="check_state_ok">满足</string>
     <string name="check_state_blocked">必须满足，否则无法开始执行</string>
     <string name="check_state_optional">可选：不满足也能拿 root，只是没法加载模块</string>
@@ -101,6 +103,9 @@
     <string name="module_fetch_kernelsu_summary">从上游 release 下载 APK 并打开安装器；root 脚本要从它里面取 libksud.so</string>
     <string name="module_fetch_kernelsu_missing">下载的 APK 不在了</string>
     <string name="module_fetch_kernelsu_no_installer">没有安装器能打开这个 APK</string>
+    <string name="module_fetch_started">正在下载…</string>
+    <string name="module_fetch_done">下载完成</string>
+    <string name="module_fetch_failed">下载失败 —— 详情见日志</string>
     <string name="component_detect_label">组件检测</string>
     <string name="component_detect_summary">检查已下载的组件包、已安装的管理器、已加载的 KernelSU 模块</string>
     <string name="component_detect_action">检测</string>
