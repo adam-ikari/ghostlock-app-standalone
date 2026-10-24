@@ -4,6 +4,11 @@
 
 关机/重启的元凶是**内核 panic**，不是 framework 崩溃、不是 LSPosed 注入、不是 recovery。
 
+根因是 **W3 的 seccomp 两位盲写落到不一致状态**（`TIF_SECCOMP=1` +
+`seccomp.mode=DISABLED`），2026-10-24 的 pstore 以
+`kernel BUG at kernel/seccomp.c:1349` + `Comm: ghostleaf_01234` 确认；
+原「SELinux re-enforce」归因已作废（见下文）。
+
 设备证据（`/sys/fs/pstore/console-ramoops-0`）：
 
 ```
@@ -25,19 +30,26 @@ ro.boot.bootreason = kernel_panic
 
 | 线索 | 含义 |
 | --- | --- |
-| `__secure_computing` | LSM/SELinux 的安全计算钩子，每次系统调用都要走 |
+| `__secure_computing` | **seccomp** 的系统调用入口检查，不是 SELinux/LSM 权限检查 |
+| `kernel BUG at kernel/seccomp.c:1349` | `switch (current->seccomp.mode)` 的 `default: BUG()`（2026-10-24 复现补全） |
 | `BUG: 00000000f2000800` | MTK 内核里的 `BUG()` 断言 |
 | `ipanic_die ... [mrdump]` | MediaTek 的 panic 处理器把 oops 升级成 panic 并落 pstore |
 | `PHYS_OFFSET: 0x40000000` | 与我们 profile 的 `kernel_phys_offset` 一致 ✓ |
 
-**因果链**：exploit 改写内核内存（cred / 安全上下文）→ 此刻 root 脚本又把 SELinux
-重新 enforce（`echo 1 > /sys/fs/selinux/enforce`）→ 正好有进程在走
-`__secure_computing` 权限检查 → 撞上被篡改的状态 → 内核 oops → MTK mrdump
-把它升级成 panic → 手机重启。
+**因果链（2026-10-24 修正）**：W3 先把 victim 的 `thread_info.flags` 清零（清
+TIF_SECCOMP），再把 `seccomp.mode` 清零。两次独立盲写；若 flags 写漏、mode 写落，
+victim 处于 `(TIF_SECCOMP=1, mode=DISABLED)`。它的下一次系统调用在
+`__secure_computing()` 的 `default` 分支 `BUG()`。2026-10-24 的 pstore 补全了
+`kernel BUG at kernel/seccomp.c:1349` 和 `Comm: ghostleaf_01234`，与这条路径逐字对得上。
+证据与时间线见 `artifacts/2026-10-24-panic-seccomp/README.md`。
 
-**所以**：panic 发生在**利用/root 阶段**，与「装模块 / 杀 zygote / Vector daemon」
-这些 LSPosed 步骤无关。之前把它归因成「Vector daemon 重启 system_server →
-rescue party → recovery」是**错的**（`kernel_panic,bug` 已经排除了那条路）。
+**作废的旧归因**：本文 2026-10-22 写的「exploit 改写内核内存 → root 脚本又把
+SELinux 重新 enforce → 撞上被篡改的状态」是**误判**。`__secure_computing` 不检查
+SELinux 权限；re-enforce 与 panic 只是时间相邻。10-22 的 pstore 缺少
+`kernel/seccomp.c:1349` 这一行，当时没有把它和 W3 的两处写联系起来。
+
+panic 发生在利用阶段（W3 之后的探针/唤醒），与「装模块 / 杀 zygote /
+Vector daemon」无关；这一点原结论成立。
 
 这也与上游 `AGENTS.md` 记的 `KERNEL-PANIC-01` 一致：
 
