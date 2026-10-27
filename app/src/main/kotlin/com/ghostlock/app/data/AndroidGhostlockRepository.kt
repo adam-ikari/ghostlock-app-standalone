@@ -468,9 +468,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         }
     }
 
-    override suspend fun runExploit(pair: CpuPair, onLog: (String) -> Unit): Int =
+    override suspend fun runExploit(pair: CpuPair, onLog: (String) -> Unit, phase: String): Int =
         withDebugAttackLog("direct", onLog) { archivedLog, debugDir, writeSidecar ->
-            runExploitBinary(pair, "libghostlock.so", archivedLog, debugDir, writeSidecar)
+            runExploitBinary(pair, "libghostlock.so", archivedLog, debugDir, writeSidecar, phase)
         }
 
 
@@ -600,6 +600,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         onLog: (String) -> Unit,
         debugDir: String?,
         writeSidecar: (String, ByteArray) -> Boolean,
+        phase: String,
     ): Int {
         val workDir = filesDir
         return try {
@@ -691,7 +692,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     environment()["GHOSTLOCK_HOME"] = workDir.absolutePath
                     environment()["TMPDIR"] = workDir.absolutePath
                     environment()["HOME"] = workDir.absolutePath
-                    environment()["GHOSTLOCK_KSU_LOG"] = ksuLog.absolutePath
+                    environment()["GHOSTLOCK_PHASE"] = phase
                     if (ksud != null) environment()["GHOSTLOCK_KSUD"] = ksud.absolutePath
                     /* Only when the user actually selected component packages:
                      * the native root script then installs the ZygiskNext /
@@ -1117,8 +1118,19 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     private fun firstValidProperty(vararg keys: String): String? = keys.asSequence().firstNotNullOfOrNull { validDeviceName(systemProperty(it)) }
 
-    /** First ksud binary in resolvePackages order, or null. */
+    /** Resolve the ksud binary to pass to the native script.
+     *
+     * The app ships its own `libksud.so` that matches the KernelSU kernel
+     * module the exploit loads. External manager apps (e.g. me.weishu.kernelsu)
+     * may bundle a newer ksud whose UAPI version mismatches the kernel side,
+     * causing "UAPI version mismatch" at module install time. Prefer the
+     * bundled binary first; only fall back to external managers if it is
+     * somehow missing. */
     private fun resolveKsudPath(onLog: (String) -> Unit): File? {
+        val ownKsud = runCatching {
+            File(appContext.applicationInfo.nativeLibraryDir, "libksud.so")
+        }.getOrNull()?.takeIf { it.isFile }
+        if (ownKsud != null) return ownKsud
         val packages = ManagerScanner.resolvePackages(selectedManagerPackage())
         for (packageName in packages) {
             val source = runCatching {
@@ -1126,7 +1138,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             }.getOrNull()?.takeIf { it.isFile } ?: continue
             return source
         }
-        onLog("<k> no manager app with libksud.so found")
+        onLog("<k> no ksud found (bundled nor manager)")
         return null
     }
 

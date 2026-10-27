@@ -853,7 +853,6 @@ class GhostlockViewModel(
         mutableState.update { it.copy(selectedManagerPackage = pkg, managerPickerVisible = false) }
     }
 
-    fun onRun() = runExploit()
 
     /**
      * Picks a Zygisk / LSPosed module zip (official releases) to install.
@@ -1003,17 +1002,52 @@ class GhostlockViewModel(
     }
 
 
-    private fun runExploit() {
-        val snapshot = kernelSnapshot ?: return
-        /* Guard in the VM as well: the button is the only caller today, but a
-           persistent root makes the chain a no-op, so never start it. */
-        if (alreadyRooted) {
+    /** Temporary root exploit + late-load. Idempotent: if root is already
+     *  present (this run or carried over) the chain is a no-op. */
+    fun onGetRoot() = runExploit(phase = "root", needsRoot = false)
+
+    /** Install the Zygisk / Vector stack, restart zygote, start the Vector
+     *  daemon and verify. Requires temporary root to already be present. */
+    fun onActivateFramework() = runExploit(phase = "activate", needsRoot = true)
+
+    /** Restart zygote while keeping the existing root and modules. Gated on a
+     *  successful activation: restarting zygote without the Vector stack in
+     *  place would leave the device without the injection it is meant to
+     *  preserve, so this only runs after Vector reported ready. */
+    fun onSoftReboot() = runExploit(phase = "reboot", needsRoot = true)
+
+    private fun runExploit(phase: String, needsRoot: Boolean) {
+        val current = state.value
+        if (current.running) return
+        if (needsRoot && !alreadyRooted) {
+            if (beginOperation()) {
+                appendLog("result: temporary root is not ready — run \"获取 root\" first")
+                mutableState.update { it.copy(setupError = "temporary root is not ready") }
+                endOperation()
+            }
+            return
+        }
+        /* Soft reboot preserves the Vector stack; without a verified activation
+         * there is nothing to preserve and the restart would drop the device
+         * into a zygote with no injection. */
+        if (phase == "reboot" && !current.vectorActive) {
+            if (beginOperation()) {
+                appendLog("result: Vector is not active — run \"激活 Vector\" and wait for ready first")
+                mutableState.update { it.copy(setupError = "Vector is not active") }
+                endOperation()
+            }
+            return
+        }
+        /* A persistent root makes the root-phase chain a no-op; activate and
+         * reboot still need to run on top of it. */
+        if (phase == "root" && alreadyRooted) {
             if (beginOperation()) {
                 appendLog("result: device already has root — the chain is temporary root only")
                 endOperation()
             }
             return
         }
+        val snapshot = kernelSnapshot ?: return
         if (!snapshot.kernelSupported) {
             if (beginOperation()) {
                 appendLog("result: exploit chain unsupported by this kernel")
@@ -1025,13 +1059,47 @@ class GhostlockViewModel(
         if (!beginOperation()) return
         send(GhostlockEffect.KeepScreenAwake(true))
         appendLog("==== start base ====")
+        appendLog("phase: $phase")
+        appendLog(
+            when (phase) {
+                "root" -> "root phase: exploit + late-load; no modules, no zygote restart"
+                "activate" -> "activate phase: install modules, restart zygote, verify Vector"
+                "reboot" -> "reboot phase: restart zygote; keep root and modules"
+                else -> "phase: $phase"
+            },
+        )
         appendLog("cpu pair: ${snapshot.cpuPairLabels.getOrElse(snapshot.selectedCpuPair) { pair.toString() }}")
+        mutableState.update { it.copy(setupBusy = true, setupState = phase, setupError = null) }
         viewModelScope.launch(Dispatchers.IO) {
+            var code = -1
             try {
-                val code = runExploitUseCase(pair, ::appendLog)
-                appendLog(if (code == 0) "result: exploit completed" else "result: exploit failed (exit code=$code)")
+                code = runExploitUseCase(pair, ::appendLog, phase)
+                appendLog(
+                    when {
+                        code != 0 && phase == "root" -> "result: root phase failed (exit code=$code)"
+                        code != 0 && phase == "activate" -> "result: activate phase failed (exit code=$code)"
+                        code != 0 && phase == "reboot" -> "result: soft reboot failed (exit code=$code)"
+                        phase == "root" -> "result: root phase finished; activate Vector next"
+                        phase == "activate" -> "result: Vector activation finished; verify in background"
+                        else -> "result: soft reboot finished"
+                    },
+                )
                 appendLog("exit code=$code")
             } finally {
+                if (code != 0) {
+                    mutableState.update {
+                        it.copy(setupError = if (phase == "root") "root phase failed" else "$phase phase failed")
+                    }
+                } else {
+                    /* The native script only reports 0 after it verified the
+                     * stack, so a clean exit is the activation evidence the
+                     * soft-reboot gate needs. */
+                    when (phase) {
+                        "root" -> alreadyRooted = true
+                        "activate" -> mutableState.update { it.copy(vectorActive = true) }
+                    }
+                }
+                mutableState.update { it.copy(setupBusy = false, rootActive = alreadyRooted) }
                 endOperation()
                 send(GhostlockEffect.KeepScreenAwake(false))
             }
@@ -1234,6 +1302,7 @@ class GhostlockViewModel(
                 executionHasProfile = loaded?.hasProfile ?: false,
                 customCpuPair = loaded?.let(::customCpuPairOf),
                 selectedManagerPackage = repository.selectedManagerPackage(),
+                rootActive = alreadyRooted,
                 runChecks = runChecksOf(
                     snapshot = snapshot,
                     hasProfile = loaded?.hasProfile == true,
@@ -1282,10 +1351,12 @@ class GhostlockViewModel(
             com.ghostlock.app.domain.model.RunCheck(
                 id = RunCheckIds.ALREADY_ROOTED,
                 ok = !alreadyRooted,
-                /* Blocking: this chain grants temporary root and the native
-                   chain bails out once a persistent root is present, so the run
-                   would do nothing. Gate the button instead of failing later. */
-                blocking = true,
+                /* Non-blocking in the three-button flow: an already-rooted
+                   device is the expected precondition for "activate Vector"
+                   and "soft reboot", and the root-phase gate in runExploit
+                   handles the no-op case. Blocking here would grey out every
+                   button the moment KernelSU is loaded. */
+                blocking = false,
             ),
         )
     }

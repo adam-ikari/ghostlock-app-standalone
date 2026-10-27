@@ -224,7 +224,7 @@ namespace ghostlock::attack {
     }
 
     void write_root_script(void) {
-        std::string script(12288, '\0');
+        std::string script(28672, '\0');
         support::UniqueFd sfd(
             open((config::runtime_config_snapshot().root_script_path.c_str()), O_WRONLY | O_CREAT | O_TRUNC, 0755));
         if (!sfd.valid()) {
@@ -240,12 +240,121 @@ namespace ghostlock::attack {
             "LOG='%s'\n"
             "SAFE_MODE=%d\n"
             "KSUD='%s'\n"
-            /* The root script is exec'd without the environment (execl), so the
-             * component-package directory has to travel inside the script. */
             "LSPD_MODULES='%s'\n"
             "SELINUX_FIXUP='%s'\n"
+            "PHASE='%s'\n"
+            "STATUS=\"$HOME_DIR/.ghostlock_status\"\n"
+            "RUN_ID=$(date +%%s 2>/dev/null)\n"
+            "BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\n"
+            "STATE=starting\n"
+            "BUSY=1\n"
+            "READY=0\n"
+            "ERROR=\n"
+            "SUPERVISOR_PID=0\n"
+            "write_status() {\n"
+            "  { echo 'schema=1'; echo \"run_id=$RUN_ID\"; echo \"boot_id=$BOOT_ID\"; echo \"pid=$SUPERVISOR_PID\"; echo \"state=$STATE\"; echo \"busy=$BUSY\"; echo \"ready=$READY\"; echo \"error=$ERROR\"; echo \"log=$LOG\"; echo \"updated=$(date +%%s 2>/dev/null)\"; } >\"$STATUS.tmp\" && chmod 644 \"$STATUS.tmp\" 2>/dev/null && mv \"$STATUS.tmp\" \"$STATUS\"\n"
+            "  if [ \"$STATE\" = \"ready\" ] || [ \"$STATE\" = \"failed\" ]; then rm -f \"$HOME_DIR/.ghostlock_run_started\" 2>/dev/null; fi\n"
+            "}\n"
+            "on_exit() {\n"
+            "  RC=$?\n"
+            "  if [ \"$RC\" -ne 0 ] && [ \"$STATE\" != \"failed\" ] && [ \"$STATE\" != \"ready\" ]; then\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR=\"script exited $RC\"; write_status\n"
+            "    echo \"[!] script exited $RC; marked failed\" >>\"$LOG\"\n"
+            "  fi\n"
+            "}\n"
+            "trap on_exit EXIT\n"
             "echo \"[*] root script start uid=$(id -u) euid=$(id -u)\" >\"$LOG\"\n"
             "chmod 644 \"$LOG\" 2>/dev/null\n"
+            "if [ -f \"$STATUS\" ]; then\n"
+            "  OLD_BOOT=$(sed -n 's/^boot_id=//p' \"$STATUS\" | head -1)\n"
+            "  OLD_PID=$(sed -n 's/^pid=//p' \"$STATUS\" | head -1)\n"
+            "  if [ \"$OLD_BOOT\" = \"$BOOT_ID\" ] && [ -n \"$OLD_PID\" ] && [ \"$OLD_PID\" != 0 ] && kill -0 \"$OLD_PID\" 2>/dev/null; then\n"
+            "    if [ \"$PHASE\" = \"root\" ]; then\n"
+            "      echo \"[!] supervisor already running pid=$OLD_PID; not starting another run\" >>\"$LOG\"\n"
+            "      exit 0\n"
+            "    fi\n"
+            "    echo \"[*] stopping previous supervisor pid=$OLD_PID for $PHASE\" >>\"$LOG\"\n"
+            "    kill -15 \"$OLD_PID\" 2>/dev/null\n"
+            "    sleep 1\n"
+            "    kill -9 \"$OLD_PID\" 2>/dev/null\n"
+            "  fi\n"
+            "fi\n"
+            "write_status\n"
+            "if [ \"$PHASE\" = \"reboot\" ]; then\n"
+            "  echo '[*] soft reboot: root and modules stay loaded' >>\"$LOG\"\n"
+            "  if [ \"$(id -u)\" != \"0\" ]; then\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR='soft reboot needs root'; write_status\n"
+            "    echo 'op:reboot fail: not root' >>\"$LOG\"\n"
+            "    exit 1\n"
+            "  fi\n"
+            "  MP=$(pidof zygisk-ptrace64 2>/dev/null | awk '{print $1}')\n"
+            "  TP=$(sed -n 's/^TracerPid:[[:space:]]*//p' /proc/1/status 2>/dev/null)\n"
+            "  if [ -z \"$MP\" ] || [ \"$TP\" != \"$MP\" ]; then\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR='rezygisk monitor not tracing init'; write_status\n"
+            "    echo \"op:reboot fail: monitor=$MP init_tracer=$TP\" >>\"$LOG\"\n"
+            "    exit 1\n"
+            "  fi\n"
+            "  P=$(pidof zygote64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
+            "  if [ -z \"$P\" ]; then\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR='zygote64 not found'; write_status\n"
+            "    echo 'op:reboot fail: zygote64 not found' >>\"$LOG\"\n"
+            "    exit 1\n"
+            "  fi\n"
+            "  STATE=soft_reboot; BUSY=1; READY=0; ERROR=; write_status\n"
+            "  rm -f /data/adb/rezygisk/state.json\n"
+            "  echo \"op:reboot kill: zygote64 pid=$P\" >>\"$LOG\"\n"
+            "  kill -9 \"$P\"\n"
+            "  i=0\n"
+            "  while [ $i -lt 120 ]; do\n"
+            "    if [ -f /data/adb/rezygisk/state.json ] && \\\n"
+            "       grep -q '\"64\": 1' /data/adb/rezygisk/state.json; then\n"
+            "      break\n"
+            "    fi\n"
+            "    sleep 1\n"
+            "    i=$((i+1))\n"
+            "  done\n"
+            "  if [ $i -ge 120 ]; then\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR='zygote injection timeout'; write_status\n"
+            "    echo 'op:reboot fail: zygote injection timeout' >>\"$LOG\"\n"
+            "    exit 1\n"
+            "  fi\n"
+            "  if [ ! -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR='Vector daemon missing'; write_status\n"
+            "    echo 'op:reboot fail: Vector daemon missing' >>\"$LOG\"\n"
+            "    exit 1\n"
+            "  fi\n"
+            "  if [ -z \"$(pidof vectord)\" ]; then\n"
+            "    echo '[*] vectord gone; restarting it after system_server settles' >>\"$LOG\"\n"
+            "    sleep 60\n"
+            "    nohup unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &\n"
+            "  fi\n"
+            "  CLI_OK=0; STATE_OK=0; i=0\n"
+            "  while [ $i -lt 12 ]; do\n"
+            "    if [ $CLI_OK = 0 ] && timeout 15 /data/adb/modules/zygisk_vector/cli status 2>&1 | grep -q 'Framework Version'; then\n"
+            "      CLI_OK=1\n"
+            "    fi\n"
+            "    if [ $STATE_OK = 0 ] && grep -q 'zygisk_vector' /data/adb/rezygisk/state.json 2>/dev/null; then\n"
+            "      STATE_OK=1\n"
+            "    fi\n"
+            "    if [ $CLI_OK = 1 ] && [ $STATE_OK = 1 ]; then break; fi\n"
+            "    sleep 5\n"
+            "    i=$((i+1))\n"
+            "  done\n"
+            "  if [ \"$CLI_OK\" = 1 ] && [ \"$STATE_OK\" = 1 ]; then\n"
+            "    STATE=ready; BUSY=0; READY=1; ERROR=; write_status\n"
+            "    echo 'op:reboot ok' >>\"$LOG\"\n"
+            "    exit 0\n"
+            "  fi\n"
+            "  STATE=failed; BUSY=0; READY=0; ERROR='Vector verify failed'; write_status\n"
+            "  echo 'op:reboot fail: Vector verify failed' >>\"$LOG\"\n"
+            "  exit 1\n"
+            "fi\n"
+            "touch /data/local/tmp/.ghostlock_vector_managed 2>/dev/null\n"
+            "if touch /data/adb/ghostlock-vector-managed 2>/dev/null; then\n"
+            "  echo '[*] managed marker pre-created' >>\"$LOG\"\n"
+            "else\n"
+            "  echo '[!] cannot pre-create /data/adb marker' >>\"$LOG\"\n"
+            "fi\n"
             "echo \"[*] seccomp=$(grep Seccomp /proc/self/status 2>/dev/null | tr '\\n' ' ')\" >>\"$LOG\"\n"
             "if [ ! -x \"$KSUD\" ]; then\n"
             "  KSUD=$(find /data/app -path '*/me.weishu.kernelsu.pr*/lib/arm64/libksud.so' 2>/dev/null | head -1)\n"
@@ -266,12 +375,13 @@ namespace ghostlock::attack {
             "if [ ! -x \"$KSUD\" ]; then KSUD=/data/adb/ksu/bin/ksud; fi\n"
             "echo \"[*] ksud=$KSUD\" >>\"$LOG\"\n"
             "echo \"[*] ksud_file=$(ls -l \"$KSUD\" 2>/dev/null)\" >>\"$LOG\"\n"
+            "cp \"$KSUD\" /data/local/tmp/.ghostlock_ksud 2>/dev/null\n"
+            "chmod 755 /data/local/tmp/.ghostlock_ksud 2>/dev/null\n"
             "echo \"[*] uname=$(uname -r)\" >>\"$LOG\"\n"
             "if [ \"$(id -u)\" -ne 0 ]; then\n"
             "  echo '[!] temp su unavailable; aborting' >>\"$LOG\"\n"
             "  exit 1\n"
             "fi\n"
-            /* the rename is atomic, so a failed read leaves the old dump in place */
             "echo \"# $(uname -r)\" >\"$HOME_DIR/.ghostlock_iomem.new\"\n"
             "if cat /proc/iomem >>\"$HOME_DIR/.ghostlock_iomem.new\" 2>/dev/null && grep -q 'System RAM' \"$HOME_DIR/.ghostlock_iomem.new\"; then\n"
             "  mv \"$HOME_DIR/.ghostlock_iomem.new\" \"$HOME_DIR/.ghostlock_iomem\"\n"
@@ -281,12 +391,18 @@ namespace ghostlock::attack {
             "  rm -f \"$HOME_DIR/.ghostlock_iomem.new\"\n"
             "  echo '[!] iomem cache: /proc/iomem read failed' >>\"$LOG\"\n"
             "fi\n"
-            /* debug archive: copy kernel/pstore/iomem evidence into the
-             * --dump-kernel-log directory (empty disables the dump). */
+            "if [ -d /sys/fs/pstore ]; then\n"
+            "  mkdir -p \"$HOME_DIR/pstore\" 2>/dev/null\n"
+            "  cp /sys/fs/pstore/* \"$HOME_DIR/pstore/\" 2>/dev/null\n"
+            "  PSN=$(ls \"$HOME_DIR/pstore\" 2>/dev/null | wc -l)\n"
+            "  [ \"$PSN\" -gt 0 ] && echo \"[*] pstore captured files=$PSN\" >>\"$LOG\"\n"
+            "fi\n"
             "DEBUG_DIR=\"%s\"\n"
             "dump_debug() {\n"
             "  [ -n \"$DEBUG_DIR\" ] || return 0\n"
-            "  mkdir -p \"$DEBUG_DIR/pstore\" 2>/dev/null || { echo \"[!] debug dump: cannot write $DEBUG_DIR\" >>\"$LOG\"; return 0; }\n"
+            "  if ! mkdir -p \"$DEBUG_DIR/pstore\" 2>/dev/null; then\n"
+            "    DEBUG_DIR=/data/local/tmp/ghostlock-debug-$$.d; mkdir -p \"$DEBUG_DIR/pstore\" 2>/dev/null || return 0\n"
+            "  fi\n"
             "  {\n"
             "    echo '== uname -a =='\n"
             "    uname -a\n"
@@ -345,8 +461,7 @@ namespace ghostlock::attack {
             "  cat /sys/fs/selinux/policy >\"$POLICY\" || return 1\n"
             "  HEADER=$(od -An -tx1 -N24 \"$POLICY\" | tr -d ' \\n')\n"
             "  case \"$HEADER\" in\n"
-            "    8cff7cf9080000005345204c696e7578"
-            "\?\?\?\?\?\?\?\?\?\?\?\?\?\?\?\?) ;;\n"
+            "    8cff7cf9080000005345204c696e7578????????????????) ;;\n"
             "    *) echo '[!] invalid policy header'; return 1 ;;\n"
             "  esac\n"
             "  # Restore missing Android netlink flags: bits 30/31, byte 23.\n"
@@ -355,8 +470,16 @@ namespace ghostlock::attack {
             "  CONFIG=$(printf '\\\\0%%03o' \"$((CONFIG | 192))\" || return 1)\n"
             "  printf '%%b' \"$CONFIG\" | dd of=\"$POLICY\" bs=1 seek=23 count=1 conv=notrunc\n"
             "}\n"
+            /* Phase 2 of a two-step run: root already loaded KernelSU and left a
+             * working ksud, so the whole prologue below (policy reload ->
+             * late-load -> re-enforce) only repeats what is already true. */
+            "PROLOGUE_SKIP=0\n"
+            "if [ \"$PHASE\" = \"activate\" ] && grep -q '^kernelsu[[:space:]]' /proc/modules 2>/dev/null && [ -x \"$KSUD\" ]; then\n"
+            "  PROLOGUE_SKIP=1\n"
+            "  echo '[*] phase=activate with KernelSU in memory; skipping policy fixup and late-load' >>\"$LOG\"\n"
+            "fi\n"
             "FIXUP_RC=1\n"
-            "if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
+            "if [ \"$SELINUX_FIXUP\" = \"1\" ] && [ \"$PROLOGUE_SKIP\" != \"1\" ]; then\n"
             "for i in $(seq 1 10); do\n"
             "  echo \"[*] fixup: attempt $i\" >>\"$LOG\"\n"
             "  if ! prepare_policy >>\"$LOG\" 2>&1; then\n"
@@ -385,26 +508,21 @@ namespace ghostlock::attack {
             "echo \"[*] policy fixup rc=$FIXUP_RC\" >>\"$LOG\"\n"
             "else\n"
             "  FIXUP_RC=2\n"
-            "  echo '[*] policy reload skipped (SELINUX_FIXUP=0)' >>\"$LOG\"\n"
+            "  if [ \"$PROLOGUE_SKIP\" = \"1\" ]; then\n"
+            "    echo '[*] policy reload skipped (prologue skipped)' >>\"$LOG\"\n"
+            "  else\n"
+            "    echo '[*] policy reload skipped (SELINUX_FIXUP=0)' >>\"$LOG\"\n"
+            "  fi\n"
             "fi\n"
             "if [ \"$FIXUP_RC\" -eq 0 ] || [ \"$FIXUP_RC\" -eq 2 ]; then\n"
-            "# load_policy ok: late-load (module init re-enforces); already-loaded restores below\n"
-            /* No `[ -x /system/bin/su ]` here: once a late-load has run, su is
-             * a magic mount and stat'ing it blocks the script. Re-running the
-             * late-load is harmless and is also what mounts su into this
-             * namespace, so the loaded case takes the same path. */
-            /* App route (SELINUX_FIXUP=0) differs in *when* the late-load runs:
-             * this root child lives in u:r:kernel:s0 and the late-load puts the
-             * policy back to enforcing, so every later exec (ksud, sh, znctl)
-             * gets EACCES. Everything that needs exec therefore has to happen
-             * while the policy is still permissive, and the late-load moves to
-             * the very end of the script (see below). */
-            "if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
+            "# Late-load runs before any module install: ksud's \"module install\"\n"
+            "# asks the kernel for its UAPI version, which is 0 until the\n"
+            "# KernelSU module is actually in memory, and a 0-vs-5 mismatch\n"
+            "# aborts the Zygisk/LSPosed stack. The app route (SELINUX_FIXUP=0)\n"
+            "# used to defer this to the end of the run, after the install, so\n"
+            "# the install always failed there.\n"
+            "if [ \"$PROLOGUE_SKIP\" != \"1\" ]; then\n"
             "if grep -q kernelsu /proc/modules 2>/dev/null; then\n"
-            /* kernelsu is in memory but su was never mounted into this
-             * namespace (the late-load is what mounts it). Re-run the
-             * late-load so the root script can switch to the ksu domain. */
-
             "  KSU_ALREADY=1\n"
             "  echo \"[*] kernelsu loaded but su missing; re-running late-load to mount su\" >>\"$LOG\"\n"
             "  chmod 755 \"$KSUD\" 2>/dev/null\n"
@@ -434,216 +552,304 @@ namespace ghostlock::attack {
             "echo '[+] KernelSU module loaded' >>\"$LOG\"\n"
             "else\n"
             "  KSU_ALREADY=0\n"
-            "  echo '[*] app route: late-load deferred to the end of the run' >>\"$LOG\"\n"
+            /* KernelSU is already loaded and owns selinux policy; re-enforcing
+             * here switches the shell from permissive to enforcing mid-run, and
+             * the shell's context (shell:s0) then loses write access to the
+             * app_data_file log/status, blinding the rest of the script. Let
+             * KernelSU manage enforcing and keep running under the live state. */
+            "  ENFORCE=$(cat /sys/fs/selinux/enforce 2>/dev/null)\n"
+            "  echo \"[*] prologue skipped; selinux enforce=$ENFORCE\" >>\"$LOG\"\n"
+            /* The skipped block is where the debug-dump trap gets installed;
+             * without it a failure before the finisher leaves no dump. */
+            "  trap dump_debug EXIT\n"
             "fi\n"
             "if [ \"$KSU_ALREADY\" -eq 1 ] && [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
             "  echo \"[*] kernelsu already loaded; restoring enforcing\" >>\"$LOG\"\n"
             "  echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
             "fi\n"
-            /* ZygiskNext / Vector(LSPosed) 栈的安装与激活。
-             *
-             * 这一段是**可选**的：只有 app 显式设置 GHOSTLOCK_LSPD_MODULES
-             * （用户选了组件包）时才执行。没设置就直接跳过，
-             * 「一键 root」永远不会因为它把设备带进 recovery。
-             *
-             * 时序与 docs/titan2-ondevice-flow.md 里真机验证过的手写流程
-             * **逐条一致**，任何一步的顺序变了都会掉进 recovery
-             * （recovery 里 adbd 关着，adb/fastboot 都够不着，只能长按电源键）：
-             *   ① KernelSU 进内存（上面那次 late-load 的副产物）→ shell 拿到 su
-             *   ② su 域：先删旧模块目录（**只删一次，在装之前**），再逐个装模块
-             *      （必须用已安装那份 /data/adb/ksu/bin/ksud；ksu 域执行不了
-             *        app 目录里的 libksud.so）
-             *   ③ su 域：再 late-load 一次（apply 模块 + 跑 stage 脚本）
-             *   ④ su 域：起 ZygiskNext 守护进程 → 它把注入点挂进 zygote
-             *   ⑤ 等 zygote 真的挂上（znctl status → zygote_states:1）
-             *   ⑥ 再等 60 秒让注入稳定，然后才起 Vector daemon
-             *      （它靠重启 system_server 注入服务；注入没稳就重启 →
-             *       framework 起不来 → rescue party → recovery）
-             * 少一步或顺序反了都会掉进 recovery，所以这段脚本刻意保守：
-             * 拿不到 zygote 就**不**起 Vector daemon，宁可不激活 LSPosed，
-             * 也不冒把设备带进 recovery 的风险。 */
+            "STATE=root; write_status\n"
             "if [ -n \"$LSPD_MODULES\" ]; then\n"
+            "  STATE=installing; write_status\n"
             "  MODZIP_DIR=\"$LSPD_MODULES\"\n"
             "  echo \"[*] modules dir=$MODZIP_DIR\" >>\"$LOG\"\n"
-            /* No su here on purpose. The root script runs in the mount
-             * namespace the exploit was launched from (adb shell's), and
-             * /system/bin/su is a magic mount that only exists in the
-             * namespaces KernelSU's manager app mounts it into — stat'ing it
-             * from here fails, and worse, the su probe can block. The
-             * installed ksud (/data/adb/ksu/bin/ksud) runs in the ksu domain
-             * on its own, so it can install the modules and read the app's
-             * private data dir without any su in the picture. */
             "  KSU_KSUD=/data/adb/ksu/bin/ksud\n"
-            /* The installed ksud only exists after a late-load has run on this
-             * device at least once. Fall back to the packaged binary (it can
-             * still install modules, just not into /data/adb/ksu/bin) instead
-             * of skipping the whole stack. */
             "  if [ ! -x \"$KSU_KSUD\" ]; then\n"
-            "    chmod 755 \"$KSUD\" 2>/dev/null\n"
-            "    if [ -x \"$KSUD\" ]; then KSU_KSUD=\"$KSUD\"; echo \"[*] installed ksud missing; using $KSU_KSUD\" >>\"$LOG\"; fi\n"
+            "    if [ -x /data/local/tmp/.ghostlock_ksud ]; then\n"
+            "      KSU_KSUD=/data/local/tmp/.ghostlock_ksud\n"
+            "    elif [ -x \"$KSUD\" ]; then\n"
+            "      KSU_KSUD=\"$KSUD\"\n"
+            "    fi\n"
+            "    echo \"[*] installed ksud missing; using $KSU_KSUD\" >>\"$LOG\"\n"
             "  fi\n"
-            /* The late-load above mounts su into this namespace, so the module
-             * install can run in the ksu domain (the shell domain cannot
-             * write /data/adb/modules_update). */
-            /* Probe su by running it instead of stat'ing it. KernelSU's su
-             * is a magic mount: `[ -x /system/bin/su ]` blocks the whole
-             * script on this device (both 2026-10-22 app runs stopped right
-             * after "modules dir=" with the helper script never written). An
-             * exec either answers or times out. */
-            "  SU=''\n"
-            "  if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
-            "  for cand in /system/bin/su /system/xbin/su; do\n"
-            "    SUOUT=$(timeout 10 \"$cand\" -c 'echo ghostlock-su-ok' 2>&1)\n"
-            "    case \"$SUOUT\" in *ghostlock-su-ok*) SU=\"$cand\"; break;; esac\n"
-            "  done\n"
+            /* Already uid 0 (the exploit's init_cred child), so the stack runs
+             * right here. This used to route through a su/exec wrapper script,
+             * which dropped the arguments and always failed; and it required
+             * SELINUX_FIXUP=1, so the app route demanded a working su -- the
+             * one thing unusable after the KernelSU module init re-enforces
+             * SELinux. run_root() keeps both routes on one call shape. */
+            "  if [ \"$(id -u)\" = \"0\" ]; then\n"
+            "    SU=''\n"
+            "    echo '[*] already root: stack steps run in-process' >>\"$LOG\"\n"
             "  else\n"
-            /* App route: no su at all. su called from u:r:kernel:s0 blocks in
-             * pipe_read and not even `timeout` gets it back (2026-10-22, both
-             * the 10s and the 60s wrapper stalls). Instead of rewriting the
-             * verified block below, point $SU at a wrapper with su's `-c CMD`
-             * shape so every call site keeps working — it just runs the
-             * command in this process instead of switching domains. */
-            "  cat >/data/local/tmp/.ghostlock_run.sh <<'RUNEOF'\n"
-            "#!/system/bin/sh\n"
-            "exec sh -c \"$2\"\n"
-            "RUNEOF\n"
-            "  chmod 755 /data/local/tmp/.ghostlock_run.sh\n"
-            "  SU=/data/local/tmp/.ghostlock_run.sh\n"
-            "  echo '[*] app route: running the stack steps directly (no su)' >>\"$LOG\"\n"
+            "    SU=''\n"
+            "    for cand in /system/bin/su /system/xbin/su; do\n"
+            "      SUOUT=$(timeout 10 \"$cand\" -c 'echo ghostlock-su-ok' 2>&1)\n"
+            "      case \"$SUOUT\" in *ghostlock-su-ok*) SU=\"$cand\"; break;; esac\n"
+            "    done\n"
+            "    echo \"[*] su=${SU:-none}\" >>\"$LOG\"\n"
             "  fi\n"
-            "  if [ -n \"$SU\" ]; then\n"
-            "    echo \"[*] su=$SU\" >>\"$LOG\"\n"
+            /* Dispatch: empty SU runs the command in this shell, which is
+             * already root on the exploit route. */
+            "  run_root() {\n"
+            "    if [ -z \"$SU\" ]; then sh -c \"$1\"; else timeout 120 \"$SU\" -c \"$1\"; fi\n"
+            "  }\n"
+            "  touch /data/local/tmp/.ghostlock_vector_managed 2>/dev/null\n"
+            "  if [ ! -x \"$KSU_KSUD\" ]; then\n"
+            "    echo \"[!] installed ksud missing ($KSU_KSUD); skipping LSPosed stack\" >>\"$LOG\"\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR='installed ksud missing'; write_status\n"
             "  else\n"
-            "    echo '[!] su unavailable; skipping LSPosed stack' >>\"$LOG\"\n"
-            "  fi\n"
-            "  if [ -z \"$SU\" ] || [ ! -x \"$KSU_KSUD\" ]; then\n"
-            "    echo '[!] su or installed ksud missing; skipping LSPosed stack' >>\"$LOG\"\n"
-            "  else\n"
-            /* The packages live in the app's private data dir, which the shell
-             * domain cannot read. ksud runs in the ksu domain, so it can
-             * list and install them. One helper script, one call: a chain of
-             * su calls is both slower and more likely to stall. */
             "    cat >/data/local/tmp/.ghostlock_modinstall.sh <<'MODINSTEOF'\n"
             "#!/system/bin/sh\n"
             "MODDIR=\"$1\"\n"
             "KSUD=\"$2\"\n"
-            "rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/zygisksu\n"
+            "rm -rf /data/adb/modules/zygisk_vector /data/adb/modules/rezygisk\n"
             "for z in \"$MODDIR\"/*.zip; do\n"
             "  [ -f \"$z\" ] || continue\n"
             "  echo \"[*] installing module $z\"\n"
             "  \"$KSUD\" module install \"$z\"\n"
-            "  echo \"[*] module install exit=$?\"\n"
+            "  RC=$?\n"
+            "  echo \"[*] module install exit=$RC\"\n"
+            "  if [ $RC -ne 0 ]; then echo \"[!] module install failed: $z\"; exit $RC; fi\n"
             "done\n"
             "MODINSTEOF\n"
-            /* The installed ksud (/data/adb/ksu/bin/ksud) is the one that
-             * can install into /data/adb/ksu/bin (the app package's ksud
-             * cannot write there: that directory belongs to the KernelSU
-             * manager's mount). The packages themselves are read from a path
-             * every domain can reach, so the ksu domain can read them. */
-            "    timeout 60 \"$SU\" -c \"sh /data/local/tmp/.ghostlock_modinstall.sh \"$LSPD_MODULES\" \"$KSU_KSUD\"\" >>\"$LOG\" 2>&1\n"
-            "    echo '[*] module install step finished' >>\"$LOG\"\n"
-            /* App route: no second late-load here. It re-enforces SELinux, and
-             * the daemon start + zygote restart right below still need exec.
-             * The app route late-loads once, at the very end. */
-            "    if [ \"$SELINUX_FIXUP\" = \"1\" ]; then\n"
-            "    echo '[*] late-load (apply modules)' >>\"$LOG\"\n"
-            "    timeout 60 \"$SU\" -c \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
-            "    echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
+            "    run_root \"sh /data/local/tmp/.ghostlock_modinstall.sh \"$LSPD_MODULES\" \"$KSU_KSUD\"\" >>\"$LOG\" 2>&1\n"
+            "    MOD_RC=$?\n"
+            "    echo \"[*] module install step finished rc=$MOD_RC\" >>\"$LOG\"\n"
+            "    if [ $MOD_RC -ne 0 ]; then\n"
+            "      STATE=failed; BUSY=0; READY=0; ERROR='module install failed'; write_status\n"
+            "      echo 'op:activation fail: module install failed' >>\"$LOG\"\n"
+            "      exit 1\n"
             "    fi\n"
+            "    chmod 755 /data/adb/modules/zygisk_vector/daemon /data/adb/modules/zygisk_vector/cli 2>/dev/null\n"
+            "    chmod 755 /data/adb/modules/rezygisk/bin/* 2>/dev/null\n"
+            "    STATE=applying; write_status\n"
+            "# Re-run late-load so the just-installed modules are picked up.\n"
+            "# Unconditional: the app route used to skip this and the Zygisk\n"
+            "# stack stayed inert after a successful install.\n"
+            "    echo '[*] late-load (apply modules)' >>\"$LOG\"\n"
+            "    run_root \"$KSU_KSUD late-load --kmi $KMI --allow-shell\" >>\"$LOG\" 2>&1\n"
+            "    echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
             "    echo '[*] starting zygisk daemon (post-fs-data)' >>\"$LOG\"\n"
-            /* post-fs-data needs the logcat/dmesg permissions the KernelSU
-             * manager's uid carries, so it runs the ksud from the app package
-             * (the installed one at /data/adb/ksu/bin/ksud lacks them). */
-            "    \"$SU\" -c \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
-            /* ------------------------------------------------------------------
-             * zygisk 模块是在 zygote 启动的那一刻被 preload 的。运行时装模块
-             * 对已经跑着的 zygote 没有任何影响，所以必须重启 zygote，让
-             * ZygiskNext 的 injector 接管新起的那个（新的 zygote 带 -Xzygote
-             * 参数，Vector 的 zygisk 模块也一并被 preload）。
-             *
-             * 【硬前置条件】杀 zygote 之前，zygiskd 必须已经就绪：
-             *   - inject_state:1  → 它已经装好 execve hook，等着注入新 zygote
-             *   - modules64 含 zygisk_vector → Vector 的 zygisk 模块在列表里
-             * 少了这一步，新起的 zygote 不会被注入，system_server 就残缺 →
-             * rescue party → recovery（2026-10-22 实测 3 次里 2 次栽在这）。
-             * 不满足就**不杀 zygote**，本轮到此为止：宁可这次没激活 LSPosed，
-             * 也不把设备带进 recovery。
-             *
-             * 轮询全部在 su（ksu 域）里一次跑完：shell 域每 fork 一次 su 要
-             * 几百毫秒，逐次轮询根本跑不完。
-             * ------------------------------------------------------------------ */
-            "    cat >/data/local/tmp/.ghostlock_znready.sh <<'ZNREADYEOF'\n"
+            "    run_root \"nohup $KSU_KSUD post-fs-data >/data/local/tmp/pfsd.log 2>&1 &\" >>\"$LOG\" 2>&1\n"
+            "    echo \"[*] post-fs-data launch rc=$?\" >>\"$LOG\"\n"
+            "    cat >/data/local/tmp/.ghostlock_zrready.sh <<'ZRREADYEOF'\n"
             "#!/system/bin/sh\n"
             "i=0\n"
             "while [ $i -lt 60 ]; do\n"
-            "  s=$(/data/adb/ksu/bin/znctl status 2>/dev/null)\n"
-            "  case \"$s\" in\n"
-            "    *inject_state:1*) case \"$s\" in *zygisk_vector*) echo \"$s\"; exit 0;; esac;;\n"
-            "  esac\n"
+            "  MP=$(pidof zygisk-ptrace64 2>/dev/null | awk '{print $1}')\n"
+            "  if [ -n \"$MP\" ]; then\n"
+            "    TP=$(sed -n 's/^TracerPid:[[:space:]]*//p' /proc/1/status 2>/dev/null)\n"
+            "    if [ \"$TP\" = \"$MP\" ]; then echo \"monitor=$MP tracing init\"; exit 0; fi\n"
+            "  fi\n"
             "  sleep 1\n"
             "  i=$((i+1))\n"
             "done\n"
             "exit 1\n"
-            "ZNREADYEOF\n"
-            "    ZREADY=$(timeout 90 \"$SU\" -c 'sh /data/local/tmp/.ghostlock_znready.sh' 2>/dev/null)\n"
+            "ZRREADYEOF\n"
+            "    ZREADY=$(run_root 'sh /data/local/tmp/.ghostlock_zrready.sh' 2>/dev/null)\n"
             "    if [ -z \"$ZREADY\" ]; then\n"
-            "      echo '[!] zygisk daemon not ready (no inject_state:1 / zygisk_vector); NOT restarting zygote' >>\"$LOG\"\n"
+            "      echo '[!] rezygisk not ready (monitor not tracing / no zygisk_vector in modules); NOT restarting zygote' >>\"$LOG\"\n"
             "      echo '[!] the LSPosed stack stays inactive this run; run it again once the daemon is up' >>\"$LOG\"\n"
+            "      echo '[*] pfsd.log:' >>\"$LOG\"\n"
+            "      tail -n 40 /data/local/tmp/pfsd.log >>\"$LOG\" 2>&1\n"
+            "      echo '[*] rezygisk bin:' >>\"$LOG\"\n"
+            "      ls -l /data/adb/modules/rezygisk/bin >>\"$LOG\" 2>&1\n"
+            "      echo \"[*] monitor=$(pidof zygisk-ptrace64 2>/dev/null) init_tracer=$(awk '/TracerPid/{print $2}' /proc/1/status 2>/dev/null)\" >>\"$LOG\"\n"
+            "      STATE=failed; BUSY=0; READY=0; ERROR=rezygisk not ready; write_status\n"
             "    else\n"
-            "      echo '[*] zygisk daemon ready' >>\"$LOG\"\n"
-            /* webview_zygote 是 zygote64 的子进程，杀 zygote64 会一起带走它；
-             * 只杀一个会让 framework 起不来 → recovery。 */
-            "      OLD_ZYGOTE=$(pidof zygote64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
-            "      if [ -n \"$OLD_ZYGOTE\" ]; then\n"
-            "        echo \"[*] killing zygote64 pid=$OLD_ZYGOTE\" >>\"$LOG\"\n"
-            "        kill -9 $OLD_ZYGOTE >>\"$LOG\" 2>&1\n"
-            "      fi\n"
-            /* 注入确认：等 zygote_states:1。没注入成功就**不**起 Vector
-             * daemon —— 它会重启 system_server，注入没稳时那一步必进 recovery。 */
-            "      cat >/data/local/tmp/.ghostlock_znwait.sh <<'ZNWAITEOF'\n"
+            "      echo '[*] rezygisk monitor ready' >>\"$LOG\"\n"
+            "      STATE=zygote; write_status\n"
+            "      cat >/data/local/tmp/.ghostlock_zrfinish.sh <<'ZRFINEOF'\n"
             "#!/system/bin/sh\n"
+            "LOG='%s'\n"
+            "HOME_DIR=${LOG%%/*}\n"
+            "STATUS=\"$HOME_DIR/.ghostlock_status\"\n"
+            "RUN_ID=$(sed -n 's/^run_id=//p' \"$STATUS\" 2>/dev/null | head -1)\n"
+            "BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\n"
+            "SUPERVISOR_PID=$$\n"
+            "STATE=waiting_injection\n"
+            "BUSY=1\n"
+            "READY=0\n"
+            "ERROR=\n"
+            "write_status() {\n"
+            "  { echo 'schema=1'; echo \"run_id=$RUN_ID\"; echo \"boot_id=$BOOT_ID\"; echo \"pid=$SUPERVISOR_PID\"; echo \"state=$STATE\"; echo \"busy=$BUSY\"; echo \"ready=$READY\"; echo \"error=$ERROR\"; echo \"log=$LOG\"; echo \"updated=$(date +%%s 2>/dev/null)\"; } >\"$STATUS.tmp\" && chmod 644 \"$STATUS.tmp\" 2>/dev/null && mv \"$STATUS.tmp\" \"$STATUS\"\n"
+            "  if [ \"$STATE\" = \"ready\" ] || [ \"$STATE\" = \"failed\" ]; then rm -f \"$HOME_DIR/.ghostlock_run_started\" 2>/dev/null; fi\n"
+            "}\n"
+            "finisher_exit() {\n"
+            "  RC=$?\n"
+            "  if [ \"$RC\" -ne 0 ] && [ \"$STATE\" != \"failed\" ] && [ \"$STATE\" != \"ready\" ]; then\n"
+            "    STATE=failed; BUSY=0; READY=0; ERROR=\"finisher exited $RC\"; write_status\n"
+            "    echo \"[!] finisher exited $RC; marked failed\" >>\"$LOG\"\n"
+            "  fi\n"
+            "}\n"
+            "trap finisher_exit EXIT\n"
+            "write_status\n"
+            "STATE_J=/data/adb/rezygisk/state.json\n"
+            "ZROK=0\n"
             "i=0\n"
-            "while [ $i -lt 120 ]; do\n"
-            "  s=$(/data/adb/ksu/bin/znctl status 2>/dev/null)\n"
-            "  case \"$s\" in *zygote_states:1*) echo \"$s\"; exit 0;; esac\n"
+            "while [ $i -lt 90 ]; do\n"
+            "  ZOUT=$(cat \"$STATE_J\" 2>/dev/null)\n"
+            "  if echo \"$ZOUT\" | grep -q '\"64\": 1' && echo \"$ZOUT\" | grep -q 'zygisk_vector' && echo \"$ZOUT\" | grep -q '\"state\": 1'; then\n"
+            "    ZROK=1\n"
+            "    echo '[*] zygote injected; rezygiskd.64 state=1, modules has zygisk_vector' >>\"$LOG\"\n"
+            "    break\n"
+            "  fi\n"
+            "  # Bypass: state.json is only written by the monitor that traced the\n"
+            "  # zygote itself. A zygote injected by an earlier monitor (or before\n"
+            "  # this monitor restart) never gets a state.json - but its maps\n"
+            "  # already prove the zygisk_vector lib is loaded. Accept that.\n"
+            "  ZPID=$(pidof zygote64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
+            "  if [ -n \"$ZPID\" ] && grep -q zygisk_vector /proc/$ZPID/maps 2>/dev/null; then\n"
+            "    ZROK=1\n"
+            "    echo \"[*] zygote pid=$ZPID already has zygisk_vector in maps (state.json stale/absent); accepting\" >>\"$LOG\"\n"
+            "    break\n"
+            "  fi\n"
             "  sleep 1\n"
             "  i=$((i+1))\n"
             "done\n"
-            "exit 1\n"
-            "ZNWAITEOF\n"
-            "      ZSTAT=$(timeout 150 \"$SU\" -c 'sh /data/local/tmp/.ghostlock_znwait.sh' 2>/dev/null)\n"
-            "      ZGONE=0\n"
-            "      if [ -n \"$ZSTAT\" ]; then ZGONE=1; fi\n"
-            "      echo \"[*] zygote patched=$ZGONE\" >>\"$LOG\"\n"
-            "      if [ \"$ZGONE\" = \"1\" ]; then\n"
-            "        echo '[*] waiting 60s for the zygote injection to settle' >>\"$LOG\"\n"
-            "        sleep 60\n"
-            "        if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
-            "          echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
-            /* 必须用**绝对路径**：daemon 脚本内部用 dirname 定位自己的目录，
-             * 相对路径会让 -Djava.class.path=daemon.apk 变成相对路径 →
-             * UnsatisfiedLinkError → daemon 静默退出（2026-10-22 真机踩到）。
-             * toybox 的 unshare 不支持 --propagation slave，只能用 -m。 */
-            "          \"$SU\" -c 'unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &' >>\"$LOG\" 2>&1\n"
-            "          sleep 20\n"
-            "        fi\n"
+            "if [ \"$ZROK\" != 1 ]; then\n"
+            "  STATE=failed; BUSY=0; READY=0; ERROR='zygote injection gate failed'; write_status\n"
+            "  echo '[!] injection gate failed after 90s; NOT starting the Vector daemon' >>\"$LOG\"\n"
+            "  echo \"[!] rezygisk state: $ZOUT\" >>\"$LOG\"\n"
+            "  exit 1\n"
+            "fi\n"
+            "STATE=injected; write_status\n"
+            "sleep 60\n"
+            "if [ -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
+            "  echo '[*] starting Vector daemon (it restarts system_server once)' >>\"$LOG\"\n"
+            "  unshare -m /data/adb/modules/zygisk_vector/daemon --system-server-max-retry=3 >/data/local/tmp/vectord.log 2>&1 &\n"
+            "  rm -f /data/adb/ghostlock-vector-managed\n"
+            "  rm -f /data/local/tmp/.ghostlock_vector_managed\n"
+            "fi\n"
+            "sleep 20\n"
+            "STATE=daemon; write_status\n"
+            "STATE=stage2; write_status\n"
+            "echo '[*] stage2 checks' >>\"$LOG\"\n"
+            "CLI_OK=0\n"
+            "i=0\n"
+            "while [ $i -lt 12 ]; do\n"
+            "  CLI_OUT=$(timeout 15 /data/adb/modules/zygisk_vector/cli status 2>&1)\n"
+            "  case \"$CLI_OUT\" in *\"Framework Version\"*) CLI_OK=1; break;; esac\n"
+            "  sleep 5\n"
+            "  i=$((i+1))\n"
+            "done\n"
+            "if [ \"$CLI_OK\" = 1 ]; then\n"
+            "  echo '[*] stage2 check cli=PASS' >>\"$LOG\"\n"
+            "else\n"
+            "  echo '[!] stage2 check cli=FAIL' >>\"$LOG\"\n"
+            "  echo \"[!] stage2 cli output: $CLI_OUT\" >>\"$LOG\"\n"
+            "fi\n"
+            "STATE_OK=0\n"
+            "if grep -q 'KernelSU' /data/adb/rezygisk/state.json 2>/dev/null && \\\n"
+            "   grep -q 'zygisk_vector' /data/adb/rezygisk/state.json 2>/dev/null && \\\n"
+            "   grep -q '\"64\": 1' /data/adb/rezygisk/state.json 2>/dev/null; then\n"
+            "  STATE_OK=1\n"
+            "  echo '[*] stage2 check state=PASS (state.json)' >>\"$LOG\"\n"
+            "else\n"
+            "  # Same bypass as the injection gate: state.json only exists for a\n"
+            "  # zygote this monitor traced from its own start. A live zygote with\n"
+            "  # zygisk_vector mapped is equivalent proof of injection.\n"
+            "  ZPID=$(pidof zygote64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
+            "  if [ -n \"$ZPID\" ] && grep -q zygisk_vector /proc/$ZPID/maps 2>/dev/null; then\n"
+            "    STATE_OK=1\n"
+            "    echo \"[*] stage2 check state=PASS (zygote pid=$ZPID maps, state.json absent)\" >>\"$LOG\"\n"
+            "  else\n"
+            "    echo '[!] stage2 check state=FAIL' >>\"$LOG\"\n"
+            "  fi\n"
+            "fi\n"
+            "PID_OK=0\n"
+            "if [ -n \"$(pidof zygisk-ptrace64 2>/dev/null)\" ]; then\n"
+            "  PID_OK=1\n"
+            "  echo '[*] stage2 check pid=PASS' >>\"$LOG\"\n"
+            "else\n"
+            "  echo '[!] stage2 check pid=FAIL' >>\"$LOG\"\n"
+            "fi\n"
+            "if [ \"$CLI_OK\" = 1 ] && [ \"$STATE_OK\" = 1 ] && [ \"$PID_OK\" = 1 ]; then\n"
+            "  echo '[+] stage2 check PASS' >>\"$LOG\"\n"
+            "else\n"
+            "  echo \"[!] stage2 check FAIL cli=$CLI_OK state=$STATE_OK pid=$PID_OK\" >>\"$LOG\"\n"
+            "fi\n"
+            "if [ \"$CLI_OK\" = 1 ] && [ \"$STATE_OK\" = 1 ] && [ \"$PID_OK\" = 1 ]; then\n"
+            "  STATE=ready; BUSY=0; READY=1; ERROR=; write_status\n"
+            "  echo 'op:activation ok' >>\"$LOG\"\n"
+            "  echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
+            "  if [ \"$READY\" = 1 ]; then\n"
+            "    echo '[*] supervisor ready' >>\"$LOG\"\n"
+            "    HB=0\n"
+            "    while :; do\n"
+            "      HB=$((HB+1))\n"
+            "      if [ \"$READY\" = 1 ] && [ $HB -ge 30 ]; then HB=0; write_status; fi\n"
+            "      sleep 1\n"
+            "    done\n"
+            "  fi\n"
+            "else\n"
+            "  echo '[!] activation stopped: stage2 checks failed' >>\"$LOG\"\n"
+            "  echo '[*] vectord.log:' >>\"$LOG\"\n"
+            "  tail -n 60 /data/local/tmp/vectord.log >>\"$LOG\" 2>&1\n"
+            "  echo '[*] rezygisk state:' >>\"$LOG\"\n"
+            "  cat /data/adb/rezygisk/state.json >>\"$LOG\" 2>&1\n"
+            "  if [ ! -x /data/adb/modules/zygisk_vector/daemon ]; then\n"
+            "    echo '[!] Vector daemon missing or not executable' >>\"$LOG\"\n"
+            "  fi\n"
+            "  STATE=failed; BUSY=0; READY=0; ERROR='stage2 failed'; write_status\n"
+            "  exit 1\n"
+            "fi\n"
+            "ZRFINEOF\n"
+            "      if [ ! -s /data/local/tmp/.ghostlock_zrfinish.sh ]; then\n"
+            "        STATE=failed; BUSY=0; READY=0; ERROR=finisher missing; write_status\n"
+            "        echo '[!] finisher missing; not restarting zygote' >>\"$LOG\"\n"
             "      else\n"
-            "        echo '[!] zygote not injected; skipping Vector daemon to avoid the system_server restart loop' >>\"$LOG\"\n"
+            "        rm -f /data/adb/rezygisk/state.json\n"
+            "        OLD_MON=$(pidof zygisk-ptrace64 2>/dev/null | tr -d '\\r' | awk '{print $1}')\n"
+            "        if [ -n \"$OLD_MON\" ]; then\n"
+            "          echo \"[*] restarting rezygisk monitor pid=$OLD_MON\" >>\"$LOG\"\n"
+            "          kill -9 $OLD_MON >>\"$LOG\" 2>&1\n"
+            "        fi\n"
+            "        ( cd /data/adb/modules/rezygisk && sh ./post-fs-data.sh ) >>\"$LOG\" 2>&1\n"
+            "        MON_OK=0; mi=0\n"
+            "        while [ $mi -lt 20 ]; do\n"
+            "          TP=$(sed -n 's/^TracerPid:[[:space:]]*//p' /proc/1/status 2>/dev/null | tr -d '\\r')\n"
+            "          if [ -n \"$TP\" ] && [ \"$TP\" != 0 ]; then MON_OK=1; echo \"[*] monitor tracing init tracer=$TP\" >>\"$LOG\"; break; fi\n"
+            "          sleep 1; mi=$((mi+1))\n"
+            "        done\n"
+            "        if [ \"$MON_OK\" != 1 ]; then\n"
+            "          STATE=failed; BUSY=0; READY=0; ERROR='rezygisk monitor not tracing init'; write_status\n"
+            "          echo '[!] monitor not tracing init after 20s; NOT restarting zygote' >>\"$LOG\"\n"
+            "          exit 1\n"
+            "        fi\n"
+            "        setsid sh /data/local/tmp/.ghostlock_zrfinish.sh </dev/null >/dev/null 2>&1 &\n"
+            "        echo '[*] finisher detached; restarting zygote64' >>\"$LOG\"\n"
+            "        OLD_ZYGOTE=''\n"
+            "        for zp in $(pidof zygote64 2>/dev/null | tr -d '\\r'); do\n"
+            "          if [ \"$(cat /proc/$zp/comm 2>/dev/null)\" = \"zygote64\" ] || \\\n"
+            "             tr '\\0' ' ' < /proc/$zp/cmdline 2>/dev/null | grep -q zygote64; then\n"
+            "            PP=$(awk '/^PPid:/{print $2}' /proc/$zp/status 2>/dev/null)\n"
+            "            if [ \"$PP\" = \"1\" ]; then OLD_ZYGOTE=$zp; break; fi\n"
+            "          fi\n"
+            "        done\n"
+            "        if [ -n \"$OLD_ZYGOTE\" ]; then\n"
+            "          echo \"[*] killing zygote64 pid=$OLD_ZYGOTE (comm/cmdline/PPID verified)\" >>\"$LOG\"\n"
+            "          kill -9 $OLD_ZYGOTE >>\"$LOG\" 2>&1\n"
+            "        else\n"
+            "          echo '[!] no verified zygote64 found; NOT killing anything' >>\"$LOG\"\n"
+            "        fi\n"
             "      fi\n"
             "    fi\n"
-            "    if [ -x /data/adb/ksu/bin/znctl ]; then\n"
-            "      echo '== zygisk next status ==' >>\"$LOG\"\n"
-            "      /data/adb/ksu/bin/znctl status >>\"$LOG\" 2>&1\n"
-            "    fi\n"
-            "    echo '[+] LSPosed stack setup done' >>\"$LOG\"\n"
             "  fi\n"
             "else\n"
             "  echo '[*] no LSPosed component packages selected; skipping the stack' >>\"$LOG\"\n"
+            "  STATE=root; BUSY=0; READY=0; write_status\n"
             "fi\n"
-            /* App route: the late-load is the last thing that happens. It loads
-             * kernelsu.ko (so `su` works from a normal shell later) but also
-             * re-enforces SELinux, which kills every exec from this domain —
-             * so nothing that needs to run may come after it. */
             "if [ \"$SELINUX_FIXUP\" = \"0\" ]; then\n"
             "  echo '[*] late-load (last step of the app route)' >>\"$LOG\"\n"
             "  chmod 755 \"$KSUD\" 2>/dev/null\n"
@@ -664,7 +870,9 @@ namespace ghostlock::attack {
             (config::runtime_config_snapshot().ksud_path.c_str()),
             (config::runtime_config_snapshot().lspd_modules_path.c_str()),
             (config::runtime_config_snapshot().selinux_fixup ? "1" : "0"),
-            (config::runtime_config_snapshot().debug_dir.c_str()));
+            (config::runtime_config_snapshot().phase.c_str()),
+            (config::runtime_config_snapshot().debug_dir.c_str()),
+            (config::runtime_config_snapshot().ksu_log_path.c_str()));
         if (n < 0 || n >= static_cast<int32_t>(script.size())) {
             pr_warning("root script too long\n");
             return;

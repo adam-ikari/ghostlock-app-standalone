@@ -184,6 +184,15 @@ data class GhostlockUiState(
     /** Per-component detection rows; empty until the user taps "检测". */
     val componentStatuses: List<ComponentDetector.Status> = emptyList(),
     val componentDetecting: Boolean = false,
+    /** Temporary root is present (this session or carried over). */
+    val rootActive: Boolean = false,
+    /** Vector passed its post-activation verification. */
+    val vectorActive: Boolean = false,
+    /** A setup pass (root / activate / reboot) owns the native binary. */
+    val setupBusy: Boolean = false,
+    /** Human-readable phase of the running setup pass. */
+    val setupState: String = "",
+    val setupError: String? = null,
 )
 
 enum class DialogType { NONE, LIST, INPUT, NOTICE }
@@ -191,7 +200,9 @@ enum class DialogType { NONE, LIST, INPUT, NOTICE }
 data class GhostlockLogLine(val text: String, val color: Int)
 
 interface GhostlockActions {
-    fun onRun()
+    fun onGetRoot()
+    fun onActivateFramework()
+    fun onSoftReboot()
     fun onProfileInvalid()
     fun onCloseExecutionSheet()
     fun onCopyLogs()
@@ -817,12 +828,9 @@ private fun ControlPanel(
             onParametersClick = actions::onOpenParameters,
             modifier = Modifier.fillMaxWidth(),
         )
-        RunButton(
-            running = state.running,
-            blocked = state.runChecks.any { !it.ok && it.blocking },
-            labelRes = R.string.action_run,
-            onClick = actions::onRun,
-            onBlockedClick = actions::onProfileInvalid,
+        SetupFlowCard(
+            state = state,
+            actions = actions,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 12.dp),
@@ -913,6 +921,96 @@ private fun ControlPanel(
                 .fillMaxWidth()
                 .padding(top = 12.dp),
         )
+    }
+}
+
+/**
+ * Three ordered actions, each gated on the previous one's result.
+ *
+ * The steps are deliberately separate instead of one button: getting root,
+ * installing the framework and restarting zygote fail for different reasons and
+ * a single tap hides which of them went wrong. The order is also load-bearing —
+ * soft reboot only preserves a Vector stack that is already running.
+ */
+@Composable
+private fun SetupFlowCard(
+    state: GhostlockUiState,
+    actions: GhostlockActions,
+    modifier: Modifier = Modifier,
+) {
+    val busy = state.running || state.setupBusy
+    val profileBlocked = state.runChecks.any { !it.ok && it.blocking }
+    Card(modifier = modifier) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = stringResource(R.string.setup_flow_hint),
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+            SetupStepButton(
+                index = 1,
+                labelRes = R.string.action_get_root,
+                done = state.rootActive,
+                enabled = !busy && !profileBlocked,
+                onClick = actions::onGetRoot,
+                onBlockedClick = actions::onProfileInvalid,
+            )
+            SetupStepButton(
+                index = 2,
+                labelRes = R.string.action_activate_framework,
+                done = state.vectorActive,
+                enabled = !busy && !profileBlocked && state.rootActive,
+                onClick = actions::onActivateFramework,
+                onBlockedClick = actions::onProfileInvalid,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            SetupStepButton(
+                index = 3,
+                labelRes = R.string.action_soft_reboot,
+                done = false,
+                enabled = !busy && state.vectorActive,
+                onClick = actions::onSoftReboot,
+                onBlockedClick = actions::onProfileInvalid,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            state.setupError?.let { error ->
+                Text(
+                    text = error,
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetupStepButton(
+    index: Int,
+    labelRes: Int,
+    done: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    onBlockedClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bgColor = if (enabled) MiuixTheme.colorScheme.primary
+    else MiuixTheme.colorScheme.disabledPrimaryButton
+    val fgColor = if (enabled) MiuixTheme.colorScheme.onPrimary
+    else MiuixTheme.colorScheme.disabledOnPrimaryButton
+    val label = "$index. " + stringResource(labelRes) + if (done) "  ✓" else ""
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 12.dp, horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = label, color = fgColor, fontSize = 15.sp)
     }
 }
 
