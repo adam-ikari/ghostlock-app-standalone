@@ -67,7 +67,7 @@ Import `profile.conf` in the app. Omit `--xbl-config` if you do not have that im
 
 ## Credits and license
 
-本项目整体按 [PolyForm Noncommercial License 1.0.0](LICENSE) 发布：代码公开、可读、可改、可自行编译，**禁止商业用途**；商业授权需单独取得书面许可。这不是 OSI 定义的开源许可（OSI 不允许限制使用领域），按惯例称 source-available。
+本项目整体按 [GNU General Public License v3.0](LICENSE) 发布：可自由使用、修改、再分发，**包括商业用途**，条件是衍生作品同样以 GPL-3.0 发布并提供对应源码。
 
 `src/core/kernelsnitch/` 的 `futex_hash.h`、`kernelsnitch.h`、`timeutils.h`、`utils.h` 移植自
 [NebuSec/CyberMeowfia](https://github.com/NebuSec/CyberMeowfia)（Apache-2.0），许可全文见
@@ -77,4 +77,4 @@ Import `profile.conf` in the app. Omit `--xbl-config` if you do not have that im
 [JoinChang/ghostlock-oneplus](https://github.com/JoinChang/ghostlock-oneplus)、
 [x-spy/CVE-2026-43499-popsicle](https://github.com/x-spy/CVE-2026-43499-popsicle)。
 
-ZygiskNext、Vector、KernelSU 管理器都不随本仓库或 APK 分发，由用户运行时自行获取；原因见 `NOTICE`。
+ZygiskNext 与 Vector 不随本仓库或 APK 分发，由用户运行时自行获取。KernelSU 管理器 APK 同样运行时获取，但其 `libksud.so`（同为 GPL-3.0）随本 APK 分发，因此运行不依赖已安装的管理器；详见 `NOTICE`。
