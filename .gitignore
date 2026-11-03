@@ -2,5 +2,16 @@ artifacts/
 *.img
 *.apk
 local.properties
+
+# 站点要静态托管 APK
+!website/public/apk/*.apk
 .gradle/
 build/
+
+# 项目记忆，不进仓库
+brain/
+
+# 站点构建产物
+website/node_modules/
+website/.vitepress/dist/
+website/.vitepress/cache/
