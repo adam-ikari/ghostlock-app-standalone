@@ -26,6 +26,7 @@ KPI：N=20 次冷启动的 ①成功率、②panic 次数、③「有 root 没 L
 | F4 | 跑完 SELinux 停在 permissive | 同 F2 日志：`policy reload skipped (SELINUX_FIXUP=0); SELinux stays permissive` |
 | F5 | 已有 root 再点一次 → 撞 F1 | `vendor/.../cve_2026_43499_backend.cpp:490-498` 的 guard 就是为此加的 |
 | F6 | 状态不可见 → 用户重复点 → F5 | UI 只有运行日志，没有「本 boot 已 root」的持久标记 |
+| F7 | Vector `vectord` 在 JVM 启动阶段 SIGSEGV，framework 进 recovery | 2026-10-24 17:39 tombstone：`Cmdline: vectord`、`signal 11`、栈顶 `__strncat_chk ← System_specialProperties ← JNI_CreateJavaVM`；设备对照实验确认 cwd 为已删除目录时 `app_process` exit=139，cwd 有效时 exit=0。见 §9 |
 
 F1 的因果链（2026-10-24 真机确认）：W3 的两处盲写落到
 `(TIF_SECCOMP=1, seccomp.mode=DISABLED)`，victim 的下一次系统调用在
@@ -34,11 +35,45 @@ F1 的因果链（2026-10-24 真机确认）：W3 的两处盲写落到
 
 ## 2. 现在已经有的保护（先别重复造）
 
-- **双步流程**：第一步只拿 root；第二步在有 root 的前提下 `su -c` 跑栈脚本，不再跑利用。
+- **单趟流程**：exploit、`late-load`、栈安装与 zygote 激活在同一个 root child 内完成。
+  `SELINUX_FIXUP=1` 时脚本先 `late-load` 把 su 挂进该 child 的命名空间，随后所有
+  `ksud module install` / `post-fs-data` / zygote 重启都走 `su -c`。app 自身永远看不到
+  这个 su，所以不能再从 app 发第二步的 `su`。
 - **already-root guard**：`handoff_probe.cpp:67` 用 `su -c 'id -u'` 探测，命中就跳过利用。
 - **run_state**：`support/run_state.cpp` 记录 `w1a..w3d`，能区分「写到哪一步」。
 - **屏幕常亮**：`MainActivity.kt:120`（`FLAG_KEEP_SCREEN_ON`）。
-- **收尾进程**：第二阶段用 `setsid` 的 finisher，zygote 重启杀掉 app 也能继续。
+- **单一 root 收尾进程（supervisor）**：脚本由 exploit 的 root child 以 `setsid` 启动，
+  zygote 重启不会杀它。它负责模块安装、等待注入、起 Vector daemon、stage2 检查和
+  两次 zygote 重启；app 只负责发起一次并读取状态。
+- **状态文件**：supervisor 原子写 `files/.ghostlock_status`（`state`/`busy`/`ready`/
+  `pid`/`error`/`log`/`boot_id`）。app 每次启动都读它，不依赖 native 的退出码；
+  `busy=1` 时禁止第二次执行，`ready=1` 时才显示“软重启”。
+- **自动软重启**：stage2 三项全 PASS 后，supervisor 再杀一次 `zygote64`，让框架模块在
+  Vector daemon 已就绪后重新加载；不整机重启，`kernelsu.ko` 保持载入。重启后等
+  `state.json` 的 `"64": 1` 重新出现，最多 120s，失败写 `state=failed` 并退出。
+- **finisher 参数错位（已修）**：root 脚本的 `DEBUG_DIR` 和 finisher 的 `LOG` 两个
+  `%s` 顺序与实参顺序相反，finisher 把日志写到了一个目录、把状态写到了 Download。
+  这是“软重启按钮不出现 / 没有报告”的根因；619 起 `DEBUG_DIR` 是第 7 个参数，
+  finisher `LOG` 是第 8 个。
+- **ReZygisk 资产包缺 `customize.sh`（620 修复）**：bundled `rezygisk.zip` 没有
+  `customize.sh`，`ksud module install` 只会原样解包，`post-fs-data.sh` 却调用
+  `./bin/zygisk-ptrace64`；该文件原本由 `customize.sh` 从
+  `lib/arm64-v8a/libzygisk_ptrace.so` 改名生成，因此不存在 → monitor 永不启动。
+  同时 `post-fs-data.sh` 里 `sh /data/adb/post-fs-data.d/rezygisk.sh` 在
+  `set -e` 下遇到缺失文件会直接退出。两者叠加使 `zrready` 超时，
+  `state=failed`，Vector 不激活、finisher 不启动、软重启按钮不出现。
+  620 的 zip 已补齐 `bin/zygisk-ptrace64`/`bin/zygiskd64`/`lib64/libzygisk.so`
+  （32 位同构），并在启动前 chmod；helper 调用改为存在才执行。
+- **Vector `daemon`/`cli` 无执行位（620 修复）**：`vector.zip` 的 `customize.sh`
+  用 `SKIPUNZIP=1` 自己解包，但不设权限；KernelSU 对这类模块不会补 755，
+  `daemon`/`cli` 落地为 644。root script 直接 exec 会 `Permission denied`，
+  stage2 的 `cli status` 也失败 → `state=failed`，同样看不到软重启。620 在
+  `ksud module install` 之后统一 `chmod 755`。
+- **错误可见性（621）**：app 在 native 前写 `.ghostlock_run_started`；下次启动若
+  没有 supervisor 状态，就显示“上次运行未留下状态”或“上次运行以重启结束”。
+  root/finisher 的 `EXIT` trap、已知失败点、5 分钟 busy 超时、120 秒 ready
+  心跳超时都写 `error=`；失败时把 `pfsd.log`、`vectord.log`、`state.json`、
+  模块 bin 列表追加到本次 ksu 日志，UI 同时显示 `激活失败：<reason>`。
 - **第二阶段门禁**：`inject_state:1` 且 `modules64` 含 `zygisk_vector` 才杀 zygote，否则不杀。
 - **app 路线的 exec 顺序**：`SELINUX_FIXUP=0` 时所有需要 exec 的动作都在 late-load 之前，
   late-load 放最后（`src/core/attack/ops.cpp:405-410`）。10-22 的 126 就是旧顺序踩出来的。
@@ -348,7 +383,7 @@ B（已有模块再跑）仍无对应的 pstore；它是次因，但 P0-1 现在
 - 漏写时直接探针没有杀死 victim 而是返回了正常 errno → 说明 action 不是 KILL，
   验证逻辑要按 errno 区分，不能按「child 是否死」判断。
 
-## 7 W3 直接探针：设计（待批，未改码）
+## 7 W3 直接探针：设计、实现与真机验证
 
 ### 7.1 为什么 p³ 不够
 
@@ -411,22 +446,70 @@ parent 的 W3 每轮：
 在直接探针落地前，**不要用 w3d 版本跑真机门禁**；如果一定要保留过渡版本，repair
 失败分支必须改成 `SIGKILL`，不能 `continue` 到 park。
 
-### 7.4 boot ledger（与探针独立）
+### 7.4 boot ledger 与 stage2 终检（已实现，真机待验）
 
-- 新文件 `run_ledger.json`，独立于 `run_state`；每次写都 fsync。
-  字段：`schema_version`、`boot_id`、`phase`（`exploit` / `stage2`）、
-  `status`（`running` / `done` / `failed`）、`started_at`、`last_step`。
+实现位置：`app/src/main/kotlin/com/ghostlock/app/data/RunLedgerCodec.kt`、
+`RunLedgerStore.kt`、`AndroidGhostlockRepository.kt`。
+
+- 新文件 `.ghostlock_run_ledger.json`，独立于 `run_state`；写入用
+  temp + `fd.sync()` + rename。`run_state` 的 reset 不碰 ledger。
+- schema（v1）：
+  ```json
+  {
+    "schema_version": 1,
+    "boot_id": "…",
+    "exploit": {"status": "done", "started_at": 0, "finished_at": 0, "last_step": "w3d"},
+    "stage2":  {"status": "failed", "started_at": 0, "finished_at": 0, "checks": "fail"},
+    "updated_at": 0
+  }
+  ```
+  用嵌套 `exploit` / `stage2` 而不是单个 `phase`：stage2 更新不能抹掉 exploit
+  尝试记录，否则 stage2 重试后同一 boot 又会被允许跑利用。
 - 运行前先读旧 ledger，**再**决定是否 reset：
-  - `boot_id` 相同且 `phase=exploit` 且 `status in {running, done, failed}` → 拒绝
-    再跑利用，提示重启；允许只跑第二阶段。
-  - `boot_id` 不同 → 允许；这是新的冷启动。
-  - `boot_id` 读不到 → exploit fail-closed，stage2 仍允许。
+  - 当前 `boot_id` 读不到 → exploit `Block`（fail-closed）；stage2 仍 `Allow`。
+  - ledger 不存在 → `Allow`。
+  - ledger 存在但损坏、schema 不支持、或 ledger 自己的 `boot_id` 为空 → exploit
+    `Block`（fail-closed）。
+  - `boot_id` 相同且 `exploit.status != not_started` → `Block`，提示重启；stage2
+    始终 `Allow`，失败只重跑第二阶段。
+  - `boot_id` 不同 → `Allow`；这是新的冷启动，旧 ledger 被新 boot 的记录替换。
+  - stage2 遇到**损坏**的 ledger 时仍然允许运行（它不碰内核写路径），但写入的
+    ledger 必须把 `exploit.status` 记为 `failed`（`RunLedgerCodec.freshBlocked`），
+    不能重置成 `not_started`。否则「损坏 ledger → 跑 stage2 → 再跑 exploit」会在
+    同一 boot 放行利用，fail-closed 就失效了。对应测试
+    `stage2 after an unreadable ledger keeps the exploit blocked`。
 - `boot_id` 用 `/proc/sys/kernel/random/boot_id`（本机 0444、`run-as` 可读），
   不用 uptime。
-- `rootMarkerValid()` 改成存 `boot_id` + uptime；只有 boot_id 相同才算有效。
+- `rootMarkerValid()` 改成读 marker 第一行的 `boot_id`；只有与当前 boot 相同才算
+  有效。旧 uptime-only marker 视为无效。
 - `StatusDisabled` 只影响 `run_state` 遥测，**不得**删除 ledger。
 - 12:16 的 run 已经把 panic run 的 `run_state` 覆盖成全 `not_start`，这是 ledger
   必须独立的直接证据。
+
+stage2 终检（`src/core/attack/ops.cpp` 的 detached finisher）：
+
+- zygote 重启后由 root finisher 跑三条只读检查：
+  - `/data/adb/modules/zygisk_vector/cli status` 输出 `Framework Version`；
+  - `/data/adb/rezygisk/state.json` 含 `KernelSU`、`zygisk_vector`、`"64": 1`；
+  - `pidof zygisk-ptrace64` 非空。
+- 每项写 `stage2 check <name>=PASS|FAIL`，汇总写 `stage2 check PASS|FAIL`；
+  `awaitRootScript()` 看到 `stage2 check FAIL` 返回 1，ledger 的 stage2 记
+  `failed`。
+- 复核 15:42 / 15:56 的 ksu log 发现：finisher 里原本写的是
+  `LOG='__LOG__'` 字面量，finisher 的输出没有进 per-run ksu log；两份 log 都停在
+  `killing zygote64`，没有 `zygote patched=1` / `LSPosed stack setup done`。
+  现已改成 `LOG='%s'` 并把 `ksu_log_path` 加进 `snprintf` 参数；新 native 已编译。
+  这是「有 root 没 LSPosed」无法从 app 日志判断的一个具体原因。
+
+验证状态：
+
+- Kotlin：`./gradlew :app:testDebugUnitTest --tests 'com.ghostlock.app.data.RunLedgerCodecTest'`
+  通过（往返、同 boot 拒绝、新 boot 允许、boot_id 缺失 fail-closed、stage2 放行、
+  stage2 不覆盖 exploit、损坏 ledger、stage2 遇损坏 ledger 时 exploit 仍为 failed）。
+- native：`make -C src ghostlock` 通过；`assembleDebug` 通过，APK 内
+  `lib/arm64-v8a/libghostlock.so` 与 `build/native/ghostlock` 一致。
+- 真机：ledger 首次放行、同 boot 二次拒绝、stage2 重试、终检 PASS/FAIL 尚未在本
+  APK 上复测。
 
 ### 7.5 真机已有证据与代价（12:09 成功 run）
 
@@ -448,10 +531,165 @@ panic 不可恢复。
 
 ### 7.6 验收
 
-- Host：ledger codec 往返；同 boot 拒绝；不同 boot 允许；boot_id 缺失 fail-closed；
-  stage2 放行。探针协议用固定向量覆盖 `allowed` / `EPERM` / `SIGSYS` 三种返回。
+- Kotlin：ledger codec 往返；同 boot 拒绝；不同 boot 允许；boot_id 缺失
+  fail-closed；stage2 放行；stage2 更新不覆盖 exploit。探针协议用固定向量覆盖
+  `allowed` / `EPERM` / `SIGSYS` 三种返回。
 - 真机：先 5 次冷启动基线（panic/root/LSPosed/耗时），再 A/B 直接探针 10 次冷启动。
   成功判据：`seccomp.c:1349` panic = 0；root+LSPosed 不低于基线；每次运行在
   `Download/ghostlock-debug-log/<时间>/` 留 `profile.conf`/`profile.bin`/日志。
 - 反例：直接探针上线后仍出现 `seccomp.c:1349` → 立即停，回查「探针成功 ⇒ flags=0」
   与过滤器 action，不再叠加写。
+
+## 8 2026-10-24 15:41 冷启动：直接探针 + Vector 激活（真机）
+
+设备 `boot_id=507b645b-81fc-4999-8690-6bca31f23e32`，运行前后 uptime 从 1 min 到 10 min，
+`dmesg | tail -120` 没有 `seccomp.c:1349`、`BUG:`、panic。**这一轮没有重启内核。**
+
+### 8.1 直接探针（查证）
+
+`/sdcard/Download/ghostlock-debug-log/20261024-154132/ghostlock-direct-0.log.txt`：
+
+```text
+[+] child is root!
+[*] pre-W3 seccomp finit_module probe = 0xfffffffd
+[*] direct seccomp flags probe = 0x16
+[*] W3: seccomp.mode attempt 1/6
+[*] seccomp finit_module probe = 0x16
+[+] child seccomp filter bypassed (finit_module errno=22)
+[+] child seccomp fully bypassed (forked workers run filter-free)
+[+] KernelSU module loaded
+[+] KernelSU ready
+[*] native exited code=0
+```
+
+判读：
+
+- `0xfffffffd` 是 `-3`（SIGSYS 杀死探针），与 12:09 的 pre-W3 语义一致；
+- `direct seccomp flags probe = 0x16`（EINVAL=22）说明 flags 已清、调用进了内核；
+- 随后 mode 写第一次就落地，`seccomp finit_module probe = 0x16`，没有进入 6 次重试；
+- 这一轮没有出现「flags 漏写 + mode 落地」的坏对，也没有 panic。
+
+### 8.2 Vector 模块（查证 + 用户确认）
+
+`/sdcard/Download/ghostlock-debug-log/20261024-154219/ghostlock-direct-1.log.txt` 是同一 boot
+的第二阶段（模块安装）：
+
+```text
+- Vector version v2.2 (3080-88f8e1fa-JingMatrix-Vector)
+- Device platform: arm64 (armeabi-v7a / arm64-v8a)
+- Extracting root module files
+- Verified module.prop
+- Verified action.sh
+- Verified service.sh
+```
+
+`/data/adb/modules/zygisk_vector/module.prop`：`version=v2.2 (3080-88f8e1fa-JingMatrix-Vector)`。
+`vectord` 两个进程（22717、29765）；manager 主页显示 `Vector / 已激活 / 2.2 (3080) · API 102`。
+用户确认「成功激活了模块」。模块目录整目录时间戳都是 15:42，先前临时改过的 `daemon`
+和 `daemon.bak` 已被模块安装覆盖；只剩一个 0 字节的 `/data/local/tmp/vectord.log`，可删。
+
+### 8.3 限制（推断 / 未验证）
+
+- `system_server` 24297 是 15:41 第一阶段重启 zygote 时起来的，Vector 模块 15:42 才安装。
+  如果 manager 的详情页仍显示「系统框架 未注入」，机制是**模块安装晚于 zygote 启动**，
+  不是模块安装失败；App 级 hook 可用，system_server 级 hook 需要「装模块后再重启 zygote」。
+- 没有再重启 zygote/system_server 去验证 system_server 注入：10-24 手动 `kill -9
+  system_server` 曾进入 crash loop，只靠重启恢复。这个实验未做，不能写成已解决。
+- 新 lib 目前有 2 次冷启动记录（15:19 的 boot 与 15:41 的 `507b645b`），都拿到 root、
+  都没有 panic；N=2 远小于 §0 的 N=20，**不能给成功率**，只能说直接探针没有复现 F1。
+
+### 8.4 下一步
+
+1. 装 §7.4 的新 debug APK，先验证 ledger 首次放行、同 boot 二次拒绝、stage2 重试、
+   `stage2 check PASS/FAIL` 出现在 per-run ksu log；再跑 1–3 次冷启动，记录
+   `boot_id`、`pre-W3`/`direct flags`/`mode attempt`、root、Vector、耗时。仍然每次
+   只改一个变量。
+2. 若要做 system_server 注入，单独设计「模块安装后再重启 zygote」的实验，并先准备
+   crash loop 的恢复路径；不和冷启动 A/B 混在一起。
+
+## 9 2026-10-24 17:39 冷启动：vectord 因已删除 cwd 崩溃 → recovery
+
+这一轮不是 W3 seccomp panic，也不是 `system_server` 自己崩：Vector 的 `vectord` 在
+JVM 启动阶段拿到空 `user.dir`，`strncat` 空指针，SIGSEGV 后 framework 进 recovery。
+
+### 9.1 证据
+
+- dropbox tombstone（17:39:06）：`Cmdline: vectord`、`uid: 0`、`signal 11 (SIGSEGV)`、
+  `Cause: null pointer dereference`；栈顶
+  `__strncat_chk ← System_specialProperties ← System.initUnchangeableSystemProperties
+  ← JNI_CreateJavaVM`。
+- 设备对照实验（同一份 `daemon.apk`，不跑 exploit）：
+  - cwd 指向已删除目录 → `app_process` exit=139（同款 SIGSEGV）；
+  - cwd=`/data/local/tmp` → exit=0。
+  证明崩溃条件是 cwd，不是 `daemon.apk` 或 JVM 本身。
+- 时序：`ksud late-load` 的 service 阶段先执行了模块自带的 `service.sh`，它从模块目录
+  起 daemon；此时 `/data/adb/modules_update → modules` 正在迁移，cwd 变成已删除目录。
+  根脚本 finisher 原本要等 `zygote patched=1`、sleep 30 后再起 daemon，但被
+  `service.sh` 抢跑。日志停在 `killing zygote64`，没有 `zygote patched=1`、没有
+  stage2 check；ledger `stage2.status=running`、`checks=unknown`。
+
+### 9.2 修复（只动模块资产与 phase 2，不动 W1–W3）
+
+1. `vector.zip/daemon`：在 shebang 后把 `dir` 解析成绝对路径，并 `cd / || exit 1`。
+   `dir` 解析为空时也直接退出，避免带错误 classpath 启动。
+2. `vector.zip/service.sh`：顶部检查 `/data/adb/ghostlock-vector-managed`，存在就
+   `exit 0`，GhostLock 管理期间模块自己的 service 不抢跑。
+3. `vector.zip/customize.sh`：安装时若存在
+   `/data/local/tmp/.ghostlock_vector_managed`，就 `touch
+   /data/adb/ghostlock-vector-managed`。
+4. `src/core/attack/ops.cpp`：模块安装前 `touch
+   /data/local/tmp/.ghostlock_vector_managed`；finisher 启动 daemon 后
+   `rm -f /data/adb/ghostlock-vector-managed`。
+5. 重新生成 `daemon.sha256` / `service.sh.sha256` / `customize.sh.sha256`，
+   重打 `assets/modules/vector.zip`（`artifacts/modules/vector.zip` 同步同样修复）。
+
+### 9.3 本地验证（已做）
+
+- 两个 zip 的 `unzip -t` 通过；三个脚本 `sh -n` 通过；三个 `.sha256` 与实际内容一致。
+- daemon cwd 冒烟：绝对路径从已删除 cwd 启动 → 走到 `exec`（cwd 已是 `/`）；
+  `$0` 为相对路径且 cwd 已删除 → 在 JVM 前 exit 1。
+- service.sh 标记冒烟：marker 存在 → 不启动 daemon；marker 不存在 → 启动。
+- `:app:assembleRelease` 与 `:app:assembleDebug` 通过；APK 内
+  `assets/modules/vector.zip` 的 sha256 与源文件一致：
+  `c9959497c8cd252fd5cb825ec090962a8bb178c9a0f98d10091540c6091e594b`。
+  Release APK sha256 `597018312924467e067dadd431b11ff2815471de291bce56a646af816d5dfd36`，
+  Debug APK sha256 `3738b2b5d5fde4e1d2f7c39796a99ad7975fbeab0583e2c4903d375b7921a6b4`。
+
+### 9.4 真机验收（待验证）
+
+冷启动跑一轮，逐项确认：
+
+1. dropbox/tombstone 不再出现 `vectord` 的 SIGSEGV；
+2. per-run ksu log 出现 `zygote patched=1`、`stage2 check PASS`；
+3. 设备不再进 recovery；
+4. ledger `stage2.status=done`、`checks=pass`。
+
+未完成真机冷启动前，这一项只能记为「本地修复完成，设备验收待跑」。
+
+### 9.5 真机第一次复跑（2026-10-24 18:24）：修复被旧缓存绕过
+
+装完 debug APK 后冷启动、跑第二轮，设备在 18:25 再次进 recovery。证据链：
+
+- `files/modules/vector.zip` 仍是 2026-10-24 12:16 的旧包
+  （9,316,843 B，sha256 `9ee832…`），不是新 APK 里的 9,317,285 B
+  （sha256 `c99594…`）。`stageLspdStackModules` 对已存在且非空的
+  `files/modules/<name>.zip` 直接 `continue`，所以换 APK 不会替换用户上次选中的包。
+- 因此本轮 `customize.sh` 仍是旧版，没有创建 `/data/adb/ghostlock-vector-managed`；
+  `service.sh`/`daemon` 也仍是旧版。
+- dropbox 在 `18:24:46.505` 又出现一条 `Cmdline: vectord`、`signal 11`、
+  `Cause: null pointer dereference` 的 tombstone；同一时间 stage2 日志刚装完
+  Vector、停在 `killing zygote64`。这是旧 daemon 的同一个空指针崩溃，不是新修复的回归。
+- 新 native 的 root 脚本本身已带 marker（`.ghostlock_root.sh` 第 226/292 行），
+  但旧 `customize.sh` 不消费它。
+
+处置：从已安装 APK 的 `assets/modules/vector.zip` 解出新包，`adb push` 到
+`/data/local/tmp/vector-fixed.zip`，再用
+`run-as com.ghostlock.app cp … files/modules/vector.zip` 覆盖缓存；旧包备份为
+`files/modules/vector.zip.bak`。覆盖后设备内缓存 sha256 = `c99594…`，与 APK 内一致。
+
+下一轮必须同时观察两件事：
+
+1. `vectord` tombstone 不再新增（证明 marker/`cd /` 生效）；
+2. `zygote patched=1` 与 `stage2 check PASS` 出现（证明杀 zygote 后注入成功）。
+
+若第 1 条通过、第 2 条仍失败，剩下的 blocker 是 ReZygisk 注入门禁，不是 Vector 的 cwd。
