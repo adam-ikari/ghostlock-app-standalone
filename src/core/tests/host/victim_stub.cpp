@@ -33,6 +33,20 @@ namespace ghostlock::session::victim {
         return host::script().next_seccomp();
     }
 
+    int32_t probe_child_seccomp_allowed_stage(void *context) {
+        (void) context;
+        host::script().record("probe_child_seccomp_allowed");
+        /* The host script starts with a filter present, so W3 must run. */
+        return 0;
+    }
+
+    SeccompFlagsProbe probe_child_seccomp_flags_stage(void *context) {
+        (void) context;
+        host::script().record("probe_child_seccomp_flags");
+        /* The direct probe clears TIF_SECCOMP on the happy path. */
+        return SeccompFlagsProbe::Cleared;
+    }
+
     int32_t verify_leaf_dir_stage(void *context) {
         host::script().record("verify_leaf");
         const int32_t result = host::script().next_leaf();

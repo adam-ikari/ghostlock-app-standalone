@@ -134,8 +134,8 @@
         pr_info(fmt, ##__VA_ARGS__); getchar(); \
     } while (0)
 
-#ifndef PAGE_SIZE
-#define PAGE_SIZE 4096
+#ifndef GHOST_PAGE_SIZE
+#define GHOST_PAGE_SIZE 4096
 #endif
 
 /* CPP02 review: SYSCHK is log-and-continue (it reports the error and returns

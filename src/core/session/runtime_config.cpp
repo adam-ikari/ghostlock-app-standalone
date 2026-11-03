@@ -105,6 +105,18 @@ static void runtime_config_init_paths(config::RuntimeConfig *config) {
     /* "0" keeps SELinux permissive (no policy reload) for this run. */
     const char *selinux_fixup = getenv("GHOSTLOCK_SELINUX_FIXUP");
     if (selinux_fixup && selinux_fixup[0] == '0') config->selinux_fixup = 0;
+
+    /* Two-step runs send "root" then "activate"; the root script skips the
+     * prologue in the activate pass when KernelSU is already in memory. */
+    const char *phase = getenv("GHOSTLOCK_PHASE");
+    /* Whitelist: phase is interpolated into the root script's PHASE='%s'. */
+    if (phase && phase[0]) {
+        if (!strcmp(phase, "root") || !strcmp(phase, "activate") || !strcmp(phase, "reboot")) {
+            config->phase = phase;
+        } else {
+            pr_warning("invalid GHOSTLOCK_PHASE '%s'; falling back to default\n", phase);
+        }
+    }
 }
 
 /* Capture all process environment and CPU/path choices exactly once. Input:

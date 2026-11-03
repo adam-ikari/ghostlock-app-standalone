@@ -96,9 +96,6 @@ int32_t main(void) {
     assert(std::holds_alternative<TcpPolicy>(make_route_policy(tcp_profile)));
     assert(std::holds_alternative<MulticastPolicy>(make_route_policy(mcast_profile)));
 
-    /* Capability projection follows the resolved policy. */
-    assert(!route_needs_ghost_disarm(select_profile) && !route_needs_ghost_disarm(tcp_profile) &&
-           route_needs_ghost_disarm(mcast_profile));
     assert(!route_capability(select_profile,
                              [](auto policy) {
                                  return std::decay_t<decltype(policy)>::tcp_payload_layout;

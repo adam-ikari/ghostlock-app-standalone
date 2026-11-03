@@ -7,8 +7,6 @@
 namespace ghostlock::session {
     bool kernelsu_module_visible() noexcept { return false; }
 
-    bool ksu_root_owned() noexcept { return false; }
-
     bool scan_ksu_log(std::string_view path, bool &loaded, bool &failed) noexcept {
         (void) path;
         (void) loaded;

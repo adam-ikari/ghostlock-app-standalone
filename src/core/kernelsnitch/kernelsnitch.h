@@ -29,8 +29,8 @@ namespace ghostlock::kernel {
 
 #define FUTEX_SZ (64ULL<<30)
 #define FUTEX_MMAP_SZ (1ULL<<30)
-#ifndef PAGE_SIZE
-#define PAGE_SIZE 4096
+#ifndef GHOST_PAGE_SIZE
+#define GHOST_PAGE_SIZE 4096
 #endif
 #define APPENDED_FUTEXES 1024
 #define MULITPLE 4
@@ -89,7 +89,7 @@ namespace ghostlock::kernelsnitch {
         FutexHashContext futex_hash;
 
         volatile unsigned char *futexes;
-        volatile unsigned char inc_futex[PAGE_SIZE];
+        volatile unsigned char inc_futex[GHOST_PAGE_SIZE];
 
         volatile size_t *futex_addrs;
         volatile size_t *times;
@@ -243,11 +243,11 @@ namespace ghostlock::kernelsnitch {
         if (ks->verbose)
             pr_info("[% 3zd] start finding mm_struct [%016zx-%016zx]\n", range->id, range->start,
                     range->end);
-        /* Keep the shift in size_t: PAGE_SIZE is an int macro, so the old
+        /* Keep the shift in size_t: GHOST_PAGE_SIZE is an int macro, so the old
          * expression converted a signed result (the only -Wsign-conversion
          * warning in the build). MM_ORDER is small; the value is unchanged. */
         const size_t mm_slab_sz =
-                static_cast<size_t>(PAGE_SIZE) << ks->mm_slab_order;
+                static_cast<size_t>(GHOST_PAGE_SIZE) << ks->mm_slab_order;
         for (size_t coarse_addr = range->start; (coarse_addr < range->end) && !ks->found; coarse_addr += COARSE_SZ) {
             if ((coarse_addr % (1ULL << 40)) == 0)
                 if (ks->verbose)

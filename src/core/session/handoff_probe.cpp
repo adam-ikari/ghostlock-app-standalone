@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace ghostlock::session {
@@ -62,20 +63,6 @@ namespace ghostlock::session {
             if (line.substr(0, end) == "kernelsu") loaded = true;
         });
         return loaded;
-    }
-
-    bool ksu_root_owned() noexcept {
-        /* KernelSU grants root through `su`; once the module is loaded and this
-         * process is authorized, `su -c 'id -u'` prints 0. This works from the
-         * unprivileged app context too, where /proc/modules may be unreadable. */
-        FILE *pipe = popen("su -c 'id -u' 2>/dev/null", "r");
-        if (pipe == nullptr) return false;
-        char buf[16] = {};
-        const char *line = fgets(buf, sizeof(buf), pipe);
-        pclose(pipe);
-        if (line == nullptr) return false;
-        while (*line == ' ' || *line == '\t') ++line;
-        return *line == '0';
     }
 
     bool scan_ksu_log(std::string_view path, bool &loaded, bool &failed) noexcept {

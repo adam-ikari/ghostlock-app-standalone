@@ -266,14 +266,6 @@ namespace ghostlock::route {
         if (!handled) result.status = RouteStatus{.code = ROUTE_UNSUPPORTED};
         return result;
     }
-
-    /* True when the resolved policy needs the post-race ghost disarm. */
-    [[nodiscard]] inline bool route_needs_ghost_disarm(
-        const profile::TargetProfile &profile) noexcept {
-        return route_capability(profile, [](auto policy) {
-            return std::decay_t<decltype(policy)>::multicast;
-        });
-    }
 } // namespace ghostlock::route
 
 #endif

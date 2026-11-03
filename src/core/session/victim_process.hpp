@@ -40,6 +40,17 @@ namespace ghostlock::session::victim {
      * (SIGSYS / EPERM / ENOSYS). Costs one fork, no kernel writes. */
     int32_t probe_child_seccomp_allowed_stage(void *context);
 
+    /* Direct W3 probe, run by the victim itself while seccomp.mode is still
+     * FILTER: 2 = TIF_SECCOMP cleared (a normal errno came back), 1 = still
+     * filtered (EPERM/ENOSYS), 0 = the child was killed or the pipe broke. */
+    enum class SeccompFlagsProbe : int32_t {
+        ChildLost = 0,
+        Blocked = 1,
+        Cleared = 2,
+    };
+
+    SeccompFlagsProbe probe_child_seccomp_flags_stage(void *context);
+
     int32_t verify_leaf_dir_stage(void *context);
 } // namespace ghostlock::session::victim
 

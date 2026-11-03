@@ -41,6 +41,11 @@ namespace ghostlock::config {
          * (2026-10-22). Process-class switch (how this run behaves), read
          * from GHOSTLOCK_SELINUX_FIXUP; default 1 = reload. */
         int32_t selinux_fixup = 1;
+        /* Which phase of a two-step run this process is ("root" or
+         * "activate"), from GHOSTLOCK_PHASE; concatenated into the root script
+         * as $PHASE. Activate after root can skip the prologue when KernelSU is
+         * already in memory and ksud is present. */
+        std::string phase;
 
         RuntimeConfig() noexcept = default;
 

