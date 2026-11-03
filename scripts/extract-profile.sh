@@ -3,7 +3,7 @@
 #
 #   ./scripts/extract-profile.sh [boot.img] [vendor_boot.img] [输出目录]
 #
-# 前置：vendor/ghostlock-app/tools/extract_rs 能构建（本脚本会自动构建）。
+# 前置：tools/extract_rs 能构建（本脚本会自动构建）。
 # 产物：<输出目录>/profile.conf   （HOCON profile，可直接导入 app）
 #       <输出目录>/analysis.txt   （内核分析报告：家族 / 路线建议 / waiter 布局 / 是否已打补丁）
 #
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
-UPSTREAM="$ROOT/vendor/ghostlock-app"
+UPSTREAM="$ROOT"
 BOOT=${1:-"$ROOT/artifacts/partitions/boot.img"}
 VENDOR=${2:-"$ROOT/artifacts/partitions/vendor_boot.img"}
 OUT_DIR=${3:-"$ROOT/artifacts/titan2"}

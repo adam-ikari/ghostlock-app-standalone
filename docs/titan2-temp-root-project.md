@@ -1,5 +1,8 @@
 # titan2_temp_root — Unihertz Titan 2 临时 root / LSPosed 可行性调查
 
+> **路径变更（2026-11-03）**：app 原来是子模块 `vendor/ghostlock-app`，现已并入仓库根目录。
+> 本文与其它带日期的文档里出现的 `vendor/ghostlock-app/xxx` 一律对应现在的 `xxx`。
+
 ## 目标
 
 调查 **Unihertz Titan 2**（Android 15，MediaTek 平台）能否在**不解锁 bootloader** 的前提下取得

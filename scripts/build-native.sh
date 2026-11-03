@@ -3,12 +3,12 @@
 #
 #   ./scripts/build-native.sh
 #
-# 产物：vendor/ghostlock-app/build/native/ghostlock
+# 产物：build/native/ghostlock
 #
 # NDK 选择顺序：
 #   1) $ONDK_HOME            —— 上游 CI 用的 ONDK r30.x（自带 rust 工具链，推荐）
 #   2) $ANDROID_NDK_HOME     —— 普通 NDK
-#   3) vendor/ghostlock-app/local.properties 的 ndk.dir
+#   3) $ROOT/local.properties 的 ndk.dir
 #
 # 注意：NDK 27/28 的 bionic 头会 #define PAGE_SIZE 4096，和上游
 # src/core/kernel/constants.hpp 里的 constexpr PAGE_SIZE 撞名 → 编译失败。
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
-UPSTREAM="$ROOT/vendor/ghostlock-app"
+UPSTREAM="$ROOT"
 ONDK_DEFAULT=/home/gem/android-sdk/ondk-r30.1
 
 if [ -z "${ONDK_HOME:-}" ] && [ -d "$ONDK_DEFAULT" ]; then

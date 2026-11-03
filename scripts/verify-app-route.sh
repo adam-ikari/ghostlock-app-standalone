@@ -12,7 +12,7 @@ set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
 RELEASE=${1:?用法: verify-app-route.sh <release> [apk]}
-APK=${2:-$ROOT/vendor/ghostlock-app/build/app/outputs/apk/release/GhostLock-v1.2(589)-arm64-v8a-release.apk}
+APK=${2:-$(ls -t "$ROOT"/build/app/outputs/apk/release/GhostLock-*-arm64-v8a-release.apk 2>/dev/null | head -1)}
 ADB=${ADB:-adb}
 SERIAL=${SERIAL:-}
 [ -n "$SERIAL" ] && ADB="$ADB -s $SERIAL"
