@@ -1,0 +1,46 @@
+GhostLock — Titan 2 临时 root / LSPosed 激活前端
+Copyright 2026 the GhostLock project
+https://github.com/YuKongA/ghostlock-app
+
+本仓库整体按 GNU General Public License v3.0（见 LICENSE）发布：
+可自由使用、修改、再分发，包括商业用途，条件是衍生作品同样以 GPL-3.0 发布
+并提供对应源码。
+
+This project as a whole is licensed under the GNU General Public License
+version 3 (see LICENSE). You may use, modify, and redistribute it, including
+commercially, provided derivative works stay under GPL-3.0 and their
+corresponding source is made available.
+
+## 仓库内包含的第三方代码
+
+| 路径 | 来源 | 许可 |
+| --- | --- | --- |
+| `src/core/kernelsnitch/{futex_hash,kernelsnitch,timeutils,utils}.h` | [NebuSec/CyberMeowfia](https://github.com/NebuSec/CyberMeowfia) 原样移植 | Apache-2.0（全文见 `LICENSES/Apache-2.0.txt`） |
+| `src/core/kernelsnitch/futex_hash.h` 内的 jhash 部分 | Bob Jenkins lookup3（public domain）+ Linux 内核中的修改版，版权行保留在文件头 | public domain / 见文件头 |
+
+`src/core/kernelsnitch/number_parse.h`、`scan_bounds.h` 为本项目自有代码。
+其余代码为本项目原创。
+
+## 仓库内随 APK 分发的第三方二进制
+
+| 路径 | 来源 | 版本 | 许可 |
+| --- | --- | --- | --- |
+| `app/src/main/jniLibs/arm64-v8a/libksud.so` | [tiann/KernelSU](https://github.com/tiann/KernelSU) 上游 release 的 `lib/arm64-v8a/libksud.so` | v3.3.1 | GPL-3.0 |
+| `app/src/main/assets/kernelsu-manager.apk` | [tiann/KernelSU](https://github.com/tiann/KernelSU) 上游 release 的管理器 APK | v3.3.1 | GPL-3.0 |
+| `app/src/main/assets/modules/rezygisk.zip` | [PerformanC/ReZygisk](https://github.com/PerformanC/ReZygisk) | v1.0.0 (515) | GPL-3.0 |
+| `app/src/main/assets/modules/vector.zip` | [JingMatrix/Vector](https://github.com/JingMatrix/Vector) | v2.2 (3080) | GPL-3.0 |
+
+四项均为 GPL-3.0，与 GhostLock 相同，组合分发不产生许可证冲突。对应源码见上表各上游仓库的相应 tag。
+若你的构建不需要内置这些文件，删除即可：root 脚本会回退到已安装管理器里的 `libksud.so`，
+组件包也可以由用户自备后手动就位。
+
+## 不随本软件分发的组件
+
+| 组件 | 来源 | 许可 |
+| --- | --- | --- |
+| ZygiskNext | https://github.com/Dr-TSNG/ZygiskNext | All rights reserved，其许可自 v4-0.9.2 起禁止再分发——因此**永远不随 APK 分发** |
+
+同一角色由 GPL-3.0 的分支 ReZygisk 承担，后者随 APK 分发。
+
+本仓库历史中不含 ZygiskNext 的二进制：早期版本曾把模块 zip 放进 `app/src/main/assets/modules/`，
+该路径已在 2026-10-22 通过历史重写从全部提交中剔除（`git rev-list --objects --all` 中已无相关对象）。

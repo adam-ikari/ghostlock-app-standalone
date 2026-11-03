@@ -1,17 +1,41 @@
+# 构建产物
+build/
+app/build/
+.gradle/
+.kotlin/
+.idea/
+cmake-build-*/
+/.build/
+target/
+*.iml
+libghostlock.so
+libextract.so
+
+# 本地产物与配置
 artifacts/
 *.img
-*.apk
 local.properties
+/ghostlock
 
-# 站点要静态托管 APK
+# 站点：源码进仓库，构建产物和 APK 由 CI 生成 / 随仓库发布
+website/node_modules/
+website/.vitepress/dist/
+website/.vitepress/cache/
+*.apk
 !website/public/apk/*.apk
-.gradle/
-build/
 
 # 项目记忆，不进仓库
 brain/
 
-# 站点构建产物
-website/node_modules/
-website/.vitepress/dist/
-website/.vitepress/cache/
+# 签名
+*.jks
+!keystore/ghostlock-release.jks
+*.keystore
+
+# 其它
+.DS_Store
+__pycache__
+/devices
+/.codex/
+/src/.codex/config.toml
+/ghostlock *
