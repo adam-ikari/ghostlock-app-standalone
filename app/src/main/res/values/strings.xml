@@ -3,6 +3,10 @@
     <string name="app_name">GhostLock Titan 2</string>
     <string name="action_run">Run</string>
     <string name="action_running">Running…</string>
+    <string name="action_get_root">Get root</string>
+    <string name="action_activate_framework">Activate Vector</string>
+    <string name="action_soft_reboot">Soft reboot</string>
+    <string name="setup_flow_hint">Flow: get root → activate Vector → soft reboot. Soft reboot restarts zygote and keeps Vector active; it only runs after activation succeeded.</string>
     <string name="advanced_settings">Advanced options</string>
     <string name="advanced_settings_summary">Profiles, debug logs, and test settings</string>
     <string name="about">About</string>

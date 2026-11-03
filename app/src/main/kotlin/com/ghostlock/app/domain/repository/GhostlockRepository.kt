@@ -172,7 +172,7 @@ interface GhostlockRepository {
 
     fun setDebugKernelLogEnabled(enabled: Boolean)
 
-    suspend fun runExploit(pair: CpuPair, onLog: (String) -> Unit): Int
+    suspend fun runExploit(pair: CpuPair, onLog: (String) -> Unit, phase: String = "root"): Int
 
     /**
      * The step left `in_progress` by the previous run (usually a kernel panic),

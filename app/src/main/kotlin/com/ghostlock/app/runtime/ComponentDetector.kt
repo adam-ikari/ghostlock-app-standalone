@@ -54,17 +54,54 @@ object ComponentDetector {
         ManagerScanner.scan(pm, selfPackage).firstOrNull { it.hasKsud }
 
     /**
-     * Whether the KernelSU kernel module is loaded *and* this app is authorised
-     * to use `su`. Two independent signals, either sufficient:
+     * Whether this boot is rooted, i.e. the KernelSU module is loaded and this
+     * app is authorised to use `su`. Three independent signals, either
+     * sufficient:
      *
+     * - The status file the root script writes records this boot's id, which
+     *   only happens after the exploit succeeded.
      * - `/proc/modules` lists `kernelsu` (module is in the kernel).
      * - `su -c 'id -u'` prints `0` (root grant works from this app context).
      *
-     * `/proc/modules` is world-readable on most stock kernels; the `su` probe
-     * matches what the native `handoff_probe.cpp` already does, so the two
-     * never disagree on the same device state.
+     * The first signal is the one that works on this device. The other two are
+     * kept because they are correct elsewhere, but under `untrusted_app` both
+     * report nothing even while KernelSU is live: `/proc/modules` is EACCES,
+     * and the `su` that KernelSU installs lives in the root mount namespace so
+     * this context cannot even stat it. Relying on them alone greyed out the
+     * activate step on a device that was already rooted.
      */
-    fun moduleActive(): Boolean = ksuInProcModules() || suReturnsZero()
+    fun moduleActive(context: Context): Boolean =
+        rootedInThisBoot(context) || ksuInProcModules() || suReturnsZero()
+
+    /**
+     * `true` when the status file carries a `boot_id` equal to the current
+     * boot's. The root script owns that file, so a match proves this boot has
+     * already been rooted; a cold boot changes the id and clears the module.
+     * The state field is deliberately not consulted: a supervisor that exits
+     * after the handoff leaves it at `installing`, and the module is loaded
+     * either way.
+     */
+    internal fun rootedInThisBoot(context: Context): Boolean = runCatching {
+        val recorded = statusField(File(context.filesDir, ".ghostlock_status"), "boot_id")
+        recorded != null && recorded == currentBootId()
+    }.getOrDefault(false)
+
+    /**
+     * Value of the `key=value` line [key] in [file], or `null`. A flat
+     * `key=value` list written by the root script, so it is parsed by hand
+     * rather than through a properties parser that would also accept the
+     * `schema=1` line as data.
+     */
+    internal fun statusField(file: File, key: String): String? = runCatching {
+        file.useLines { lines ->
+            lines.firstOrNull { it.startsWith("$key=") }?.substringAfter('=')?.trim()
+        }
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    /** This boot's id, or `null` when unreadable (older kernels). */
+    private fun currentBootId(): String? = runCatching {
+        File("/proc/sys/kernel/random/boot_id").readText().trim()
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
 
 
     /**
@@ -107,7 +144,7 @@ object ComponentDetector {
         val stagedZygiskNext = stagedVersion(context, zygiskNext)
         val stagedVector = stagedVersion(context, vector)
         val manager = installedManager(pm, selfPackage)
-        val active = moduleActive()
+        val active = moduleActive(context)
         return listOf(
             Status(
                 key = "zygisknext_staged",

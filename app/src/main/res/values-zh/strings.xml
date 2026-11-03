@@ -3,6 +3,10 @@
     <string name="app_name">GhostLock Titan 2 版</string>
     <string name="action_run">执行</string>
     <string name="action_running">执行中…</string>
+    <string name="action_get_root">获取 root</string>
+    <string name="action_activate_framework">激活 Vector</string>
+    <string name="action_soft_reboot">软重启</string>
+    <string name="setup_flow_hint">流程：获取 root → 激活 Vector → 软重启。软重启只重启 zygote 并保持 Vector 已激活；它仅在激活成功后可用。</string>
     <string name="advanced_settings">高级选项</string>
     <string name="advanced_settings_summary">配置参数、调试日志与测试设置</string>
     <string name="about">关于</string>

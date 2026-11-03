@@ -104,7 +104,14 @@ tasks.register<Exec>("buildGhostlockNative") {
     outputs.file(file("build/native/ghostlock"))
 }
 
-tasks.register<Copy>("prepareGhostlockJniLibs") {
+/* The packaged lib must never lag the native build. A plain Copy task treats
+ * the source file as unchanged whenever make rewrites it in place -- the
+ * mtime moves but the task-relationship snapshot does not -- so the APK kept
+ * shipping the previous libghostlock.so and every runtime symptom pointed at
+ * fixed code. Deleting the destination first makes the copy unconditional in
+ * practice while still letting gradle skip the whole chain when nothing in
+ * src/ moved. */
+tasks.register<Sync>("prepareGhostlockJniLibs") {
     description = "prepareGhostlockJniLibs"
     dependsOn("buildGhostlockNative")
     from("build/native/ghostlock")
@@ -117,6 +124,8 @@ tasks.register<Copy>("prepareGhostlockJniLibs") {
     val stripPath = File(extractNdkTools().clang)
         .resolveSibling("llvm-strip").absolutePath
     val packagedPath = File(rootDir, "app/src/main/jniLibs/arm64-v8a/libghostlock.so").absolutePath
+    inputs.file(file("build/native/ghostlock"))
+    outputs.file(packagedPath)
     doLast {
         val code = ProcessBuilder(stripPath, "--strip-all", packagedPath)
             .inheritIO()

@@ -28,8 +28,8 @@ class ParseSourceUseCase(private val repository: GhostlockRepository) {
 }
 
 class RunExploitUseCase(private val repository: GhostlockRepository) {
-    suspend operator fun invoke(pair: CpuPair, onLog: (String) -> Unit) =
-        repository.runExploit(pair, onLog)
+    suspend operator fun invoke(pair: CpuPair, onLog: (String) -> Unit, phase: String = "root") =
+        repository.runExploit(pair, onLog, phase)
 }
 
 class ReadDocumentUseCase(private val repository: GhostlockRepository) {

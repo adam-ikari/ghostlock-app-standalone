@@ -764,7 +764,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         }
 
     override suspend fun deviceHasRoot(): Boolean =
-        withContext(Dispatchers.IO) { ComponentDetector.moduleActive() }
+        withContext(Dispatchers.IO) { ComponentDetector.moduleActive(appContext) }
 
     /** Reverse-proxy prefix used for component downloads; empty means direct. */
     override fun downloadMirror(): String =

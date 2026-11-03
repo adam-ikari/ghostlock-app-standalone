@@ -4,6 +4,7 @@ import android.app.Application
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -51,32 +52,57 @@ class ComponentDetectorTest {
     }
 
     @Test
-    fun `nothing staged reports absent rather than an exception`() {
-        val zygiskNext = ComponentFetcher.byKey(ComponentFetcher.ZygiskNextKey)!!
-        assertNull(ComponentDetector.stagedVersion(context, zygiskNext))
-    }
-
-    @Test
-    fun `a staged package that is not a zip is rejected`() {
-        /* The fetch path leaves a `<name>.part` file behind on a failed
-         * download; the detector must not report that as ready. */
+    fun `a package picked under its release name is still detected`() {
+        /* The file picker keeps the original name; the native script installs
+         * every zip in the dir, so detection must not look only for the name
+         * the fetcher would use. */
         val component = ComponentFetcher.byKey(ComponentFetcher.VectorKey)!!
         val dir = File(context.filesDir, "modules").apply { mkdirs() }
-        File(dir, component.fileName).writeText("not a zip")
-        assertNull(ComponentDetector.stagedVersion(context, component))
-    }
-
-    @Test
-    fun `a staged package of the wrong module is rejected`() {
-        val component = ComponentFetcher.byKey(ComponentFetcher.VectorKey)!!
-        val dir = File(context.filesDir, "modules").apply { mkdirs() }
-        val zip = File(dir, component.fileName)
+        val zip = File(dir, "Vector-v2.2.zip")
         java.util.zip.ZipOutputStream(zip.outputStream()).use { archive ->
             archive.putNextEntry(java.util.zip.ZipEntry("module.prop"))
-            archive.write("id=some_other_module\nversion=v9\n".toByteArray())
+            archive.write("id=zygisk_vector\nversion=v2.2\n".toByteArray())
+            archive.closeEntry()
+            archive.putNextEntry(java.util.zip.ZipEntry("payload.bin"))
+            val blob = ByteArray(120_000)
+            java.util.Random(3L).nextBytes(blob)
+            archive.write(blob)
             archive.closeEntry()
         }
-        assertNull(ComponentDetector.stagedVersion(context, component))
+        assertEquals("v2.2", ComponentDetector.stagedVersion(context, component))
+    }
+
+    @Test
+    fun `a bundled package counts as staged without touching disk`() {
+        /* Both modules ship inside the APK, so a fresh install must not report
+         * them missing and send the user off to download anything. */
+        val component = ComponentFetcher.byKey(ComponentFetcher.VectorKey)!!
+        assertNotNull(ComponentDetector.stagedVersion(context, component))
+    }
+
+    @Test
+    fun `a boot id in the status file is read back`() {
+        val file = File(context.filesDir, "status_a")
+        file.writeText("schema=1\nrun_id=1\nboot_id=ABC-123\nstate=installing\n")
+        assertEquals("ABC-123", ComponentDetector.statusField(file, "boot_id"))
+        assertEquals("installing", ComponentDetector.statusField(file, "state"))
+    }
+
+    @Test
+    fun `a missing key or file reads as null`() {
+        val file = File(context.filesDir, "status_b")
+        file.writeText("boot_id=ABC-123\n")
+        assertNull(ComponentDetector.statusField(file, "state"))
+        assertNull(ComponentDetector.statusField(File(context.filesDir, "status_absent"), "boot_id"))
+    }
+
+    @Test
+    fun `a boot id must match exactly, not by prefix`() {
+        /* boot_idx=9 is a different key; a prefix match would report the device
+         * rooted on an unrelated boot counter. */
+        val file = File(context.filesDir, "status_c")
+        file.writeText("boot_idx=9\n")
+        assertNull(ComponentDetector.statusField(file, "boot_id"))
     }
 
     @Test

@@ -185,7 +185,9 @@ private fun GhostlockRoute(
     GhostlockApp(
         state = state,
         actions = object : GhostlockActions {
-            override fun onRun() = viewModel.onRun()
+            override fun onGetRoot() = viewModel.onGetRoot()
+            override fun onActivateFramework() = viewModel.onActivateFramework()
+            override fun onSoftReboot() = viewModel.onSoftReboot()
             override fun onProfileInvalid() = viewModel.onProfileInvalid()
             override fun onCloseExecutionSheet() = viewModel.onCloseExecutionSheet()
             override fun onCopyLogs() = viewModel.copyLogs()

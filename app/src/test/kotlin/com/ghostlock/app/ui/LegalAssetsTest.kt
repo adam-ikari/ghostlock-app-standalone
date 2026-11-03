@@ -32,21 +32,25 @@ class LegalAssetsTest {
     }
 
     @Test
-    fun `terms state the risk and the noncommercial scope`() {
+    fun `terms state the risk and the authorized device scope`() {
         val terms = assetText(LegalDocument.Terms.assetName)
         assertTrue(terms.contains("风险"))
-        assertTrue(terms.contains("禁止任何形式的商业使用"))
+        assertTrue(terms.contains("已取得设备所有者明确书面授权"))
     }
 
     @Test
-    fun `project license is polyform noncommercial`() {
-        assertTrue(assetText("LICENSE.txt").contains("PolyForm Noncommercial"))
+    fun `project license is gpl3`() {
+        val license = assetText("LICENSE.txt")
+        assertTrue(license.contains("GNU GENERAL PUBLIC LICENSE"))
+        assertTrue(license.contains("Version 3, 29 June 2007"))
     }
 
     @Test
-    fun `third party notice credits apache licensed code`() {
+    fun `third party notice credits apache licensed code and the bundled ksud`() {
         val notice = assetText("NOTICE.txt")
         assertTrue(notice.contains("CyberMeowfia"))
+        assertTrue(notice.contains("libksud.so"))
+        assertTrue(notice.contains("KernelSU"))
         assertTrue(assetText("Apache-2.0.txt").contains("Apache License"))
     }
 
