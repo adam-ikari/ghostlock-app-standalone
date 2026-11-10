@@ -7,7 +7,7 @@ titleTemplate: false
 
 **Android 临时 root，一键执行。** 利用 CVE-2026-43499 内核 futex use-after-free，在不解锁 bootloader、不刷 boot 镜像的前提下取得临时 root，并在内存中 late-load KernelSU。重启即失效，无残留。
 
-<a class="dl-btn" href="apk/GhostLock-v1.2(608)-arm64-v8a-release.apk" download>⬇ 下载 GhostLock v1.2 (APK, 2.7 MB)</a>
+<a class="dl-btn" href="apk/GhostLock-v1.2(647)-arm64-v8a-release.apk" download>⬇ 下载 GhostLock v1.2 (APK, 24.7 MB)</a>
 
 ::: danger 下载前必读
 本软件利用内核漏洞提权，可能导致设备 panic、重启或数据丢失。**仅限对自己拥有或已获授权的设备使用，禁止商用。**
@@ -28,9 +28,9 @@ titleTemplate: false
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | v1.2 (versionCode 608) |
+| 版本 | v1.2 (versionCode 647) |
 | 架构 | arm64-v8a |
-| 大小 | 2.7 MB |
+| 大小 | 24.7 MB |
 | 系统要求 | Android 12+（minSdk 31） |
 | 包名 | `com.ghostlock.app` |
 | 许可 | GPL-3.0（内置 ReZygisk / Vector / KernelSU 管理器） |
@@ -38,8 +38,8 @@ titleTemplate: false
 校验：
 
 ```bash
-sha256sum GhostLock-v1.2\(608\)-arm64-v8a-release.apk
-# 9135c7f97201725f56d4912bf7280ac932d32f1d9a0f7b3e61f94b1df239bf88
+sha256sum GhostLock-v1.2\(647\)-arm64-v8a-release.apk
+# a4aec86a2938156db36f4a25bcd4f8e62d56e3d0efb0994a3a519c3ecccf66db
 ```
 
 ## 使用步骤
