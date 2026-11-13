@@ -111,6 +111,26 @@ sha256sum GhostLock-v1.2\(648\)-arm64-v8a-release.apk
 不要安装会改写系统分区、替换 boot 镜像或依赖持久化挂载的模块——它们在临时 root 下要么无效，要么会导致开机异常。
 :::
 
+## 使用案例
+
+以下案例在本机（Unihertz Titan 2，临时 root + Vector）上实际启用并验证。截图只展示模块与作用域，不包含账号、聊天或联系人内容。
+
+### 微信平板模式
+
+模块 **微信平板模式（极简版）**（`cc.liujiale.wxpad`）把微信识别的设备型号改为 `Lenovo TB-9707F`，作用域固定为微信。
+
+<img src="/cases/wxpad-scope.png" alt="Vector 管理器中微信平板模式的作用域设置" style="width:100%;max-width:360px;margin:16px auto;display:block;border-radius:12px;border:1px solid var(--vp-c-border)" />
+
+启用后重启微信，微信会按平板设备登录：手机端保持在线，平板端可同时登录同一账号。切换回普通模式时，在 Vector 管理器的模块页关掉该模块并重启微信即可。
+
+### 独立 DPI
+
+模块 **DPIS** 可以为单个应用单独设定分辨率与 DPI（例如把微信或浏览器调成更宽的信息密度），不影响其他应用。典型用法：在 DPIS 里选中目标应用 → 设定数值 → 从最近任务划掉该应用再重新打开。
+
+### 应用功能增强
+
+模块 **HookVip**、**B站国际版增强** 等同类模块，按「模块使用」一节启用并勾选作用域即可。它们只影响被勾选的应用；关掉作用域或停用模块后，应用恢复原样。
+
 ## 支持设备
 
 **本版本（v1.2 / 648）只随附 Unihertz Titan 2 的 profile**，内核
