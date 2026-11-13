@@ -469,7 +469,7 @@ ps
 | 1 | `PHASE=root` 携带 `GHOSTLOCK_LSPD_MODULES`，提前 late-load 后脚本失去写/exec 能力 | **已修（native）** | `write_root_script` 对 `phase=="root"` 强制空列表 |
 | 2 | 已 root 时 activate/reboot 被守卫直接拒绝，走不到脚本 | **已修（native）** | 守卫改为 `su -c "sh <script>"` 并以其退出码退出 |
 | 3 | app uid 未授权，无法 exec `su` | **待用户授权** | `run-as … su` → `ENOENT`；`com.ghostlock.app` 不在 allowlist |
-| 4 | `vectorActive` 只在内存，zygote 重启后 app 重开显示未激活 | 未修（后续） | 重开后需再点一次激活；本轮 ready-check 让它秒回 0 |
+| 4 | `vectorActive` 只在内存，app 重开显示未激活 | **已修（Kotlin，见 §12.8）** | 冷启动由 `.ghostlock_status` 复算：`state=ready` + `ready=1` + `boot_id` 匹配当前 boot |
 | 5 | KernelSU 管理器被禁用（`enabled=3`），授权 UI 不存在 | **已恢复** | `pm enable me.weishu.kernelsu` → `enabled=1` |
 
 #### 12.5.1 改动与构建
@@ -518,3 +518,104 @@ ps
 预期：守卫命中 → `su` 执行脚本 → 快退分支 `state=ready`、`exit 0`，不安装、
 不重启 zygote，app 把 `vectorActive` 置真。之后 `vectorActive` 的内存态问题
 （第 4 项）再单独处理。
+
+### 12.7 当前状态注记（2026-11-04）
+
+同机（boot_id `10138c54-…`，Android 16）上 app 点「激活 Vector」一次失败：
+`state=failed error=zygote injection gate failed`，`/data/adb/rezygisk` 只剩
+`init_monitor`，无 `cp64.sock`、无 `state.json`；该次脚本先起 monitor（17357）、
+杀重启（17382），校验到 `TracerPid(init)=17382` 后立即杀 zygote 9526。
+
+同一 boot 内手工跑「杀干净全部 `zygisk-ptrace64` → `setsid` 起一次
+`post-fs-data.sh` → 校验 `TracerPid(init)` → 杀一次 zygote」成功：1 秒出
+`state.json`（`KernelSU` / `rezygiskd.64.state=1` / `modules=[zygisk_vector]` /
+`zygote.64=1`），新 zygote 带 6 段 zygisk 映射；`vectord` 起来后 `cli status` 报
+Framework Version 2.2 / 14 个模块。再跑 app 生成的 `.ghostlock_root.sh` 命中
+L353 快退，`.ghostlock_status` 变 `state=ready busy=0 ready=1`。
+
+所以 §12.6 的「用户点按钮即可」在 11-04 这个 boot 上不成立，阻塞点在脚本的
+monitor 重启段，不在 su 授权。改动计划见
+`docs/development/plan-vector-monitor-readiness-2026-11-04.md`。
+
+> 本节「阻塞点在脚本的 monitor 重启段」的归因已被 2026-11-05 的受控实验推翻：
+> 真正的问题是 C2 就绪判据的顺序（`cp64.sock` 只在 monitor 启动 zygote 后才由
+> 其 spawn 的 `zygiskd64` 创建），详见该计划文档「根因」节。
+
+## 12.8 `vectorActive` 的持久化恢复（2026-11-05，M 级）
+
+### 动机
+
+真机 11-05 复核：设备侧 Vector 完全在位（monitor 2102 追 init、`zygiskd64` 2118、
+`cp64.sock` + `state.json`、新 zygote 2115 带 6 段映射、`cli status` 报 Framework
+Version 2.2 / 14 模块），`.ghostlock_status` 也是 `state=ready busy=0 ready=1`，
+但 app 第 2 步显示「未激活」。原因是这一步的 `done` 绑的是纯内存字段
+（`GhostlockUI.kt:962` ← `GhostlockUiState.vectorActive`，初值 `false`），
+而它唯一的写入点在「本次会话内 activate 跑成功」的 `finally` 里
+（`GhostlockViewModel.kt:1099`）。第 1 步的 root 状态有持久化恢复
+（`ComponentDetector.rootedInThisBoot()` 读 `boot_id`），第 2 步没有，所以 app
+一重开就退回未激活，并连带把第 3 步「软重启」按钮锁死
+（`GhostlockUI.kt:972` 的 `enabled` 依赖 `state.vectorActive`）。
+
+### 影响文件
+
+| 文件 | 改动 |
+| --- | --- |
+| `app/src/main/kotlin/com/ghostlock/app/runtime/ComponentDetector.kt` | 新增纯函数 `vectorActivated(statusFile, currentBootId)` 与 `vectorReady(context)` |
+| `app/src/main/kotlin/com/ghostlock/app/domain/repository/GhostlockRepository.kt` | 新增 `suspend fun vectorReady(): Boolean` |
+| `app/src/main/kotlin/com/ghostlock/app/data/AndroidGhostlockRepository.kt` | 实现：`withContext(Dispatchers.IO)` 调探测器 |
+| `app/src/main/kotlin/com/ghostlock/app/ui/GhostlockViewModel.kt` | `refreshSnapshot()` 复算并写入 `vectorActive` |
+| `app/src/test/kotlin/com/ghostlock/app/runtime/ComponentDetectorTest.kt` | 4 条新用例 |
+
+### 判据与行为差异
+
+判据三条同时成立才算激活：`state=ready`、`ready=1`、`boot_id` 等于当前 boot。
+
+与 `rootedInThisBoot()` 不同，这里**必须**看 `state`：脚本只在验证过注入的路径上
+写 `ready`，中途死亡的 supervisor 会留下 `starting`/`installing`/`soft_reboot`，
+那些都不能点亮这一步。
+
+| 场景 | 改前 | 改后 |
+| --- | --- | --- |
+| 冷启动，文件 `ready` 且同 boot | 未激活（需再点一次） | 已激活，第 3 步可用 |
+| 冷启动，文件来自上一个 boot | 未激活 | 未激活（冷启动必然丢注入，正确） |
+| 会话内 activate 成功 | 已激活 | 已激活（脚本 `exit 0` 前已写 `ready`，两条路径结论一致） |
+| activate 失败 | 保持上一次内存值 | 未激活（文件已是 `failed`，方向更保守） |
+| 软重启成功 | 已激活 | 已激活（reboot 段 L408 同样写 `STATE=ready; READY=1`） |
+
+残余假阳性：文件 `ready` 但注入已实际丢失（如 monitor 掉线后 zygote 重启）。此时
+第 3 步可点，但 reboot 阶段自带 fail-closed 判据（`src/core/attack/ops.cpp` L347-410，
+本次未改），设备不会被推向无注入状态；显示层不做二次实时探测，因为 untrusted_app
+读不到 `/data/adb`，加探测只会引入新的授权依赖。
+
+不改：native 脚本、`.ghostlock_status` 字段与写法、`.ghostlock_run_started` 语义、
+L347-410 reboot 段。
+
+### 验证
+
+| # | 项 | 命令 | 结果 |
+| --- | --- | --- | --- |
+| V1 | 新用例 | `./gradlew :app:testDebugUnitTest --tests '*ComponentDetectorTest*'` | 新增 4 条全过（同 boot ready、跨 boot ready、`failed`/`installing`、`state` 与 `ready` 不一致/文件缺失/`boot_id` 为 null） |
+| V2 | 全量单测 | `./gradlew :app:testDebugUnitTest` | 130 条，3 条失败，均为既有失败（见下） |
+| V3 | 构建 | `./gradlew :app:assembleDebug` | `BUILD SUCCESSFUL`，无 Kotlin 告警；产物 `GhostLock-v1.2(647)-arm64-v8a-debug.apk`，`sha256 9dc40d86a900…` |
+| V4 | 真机 UI | 装新 APK → 冷启动 app（不动进程与状态文件） | 待做 |
+
+V2 的 3 条失败与本次改动无关，且已确认在改动之前就存在：前两条用 HEAD
+（`b53c3750`）独立 worktree 复跑，失败用例名逐字相同；第三条
+（`ComponentFetcherTest > the bundled components are the ones the root script installs`）
+只读 `ComponentFetcher.Defaults`，该文件在工作树中未被改动（`git status` 不含它），
+故同一断言在 HEAD 必然同结果。
+
+这三条指向的是暂存组件识别的既有问题，本次**只记录线索，不下结论**（未验证）：
+`Defaults` 第一个组件是 `key=zygisknext` / `label=ZygiskNext` / `moduleId=zygisksu` /
+`fileName=zygisknext.zip`，而 `app/src/main/assets/modules/` 里实际打的是
+`rezygisk.zip`，测试则期望 `["rezygisk", "zygisk_vector"]`；同时
+`stagedVersion()` 只看 `<filesDir>/modules/<fileName>`，全仓没有任何把
+`assets/modules/*.zip` 复制到 `filesDir` 的代码（`grep assets/modules` 无命中），
+「bundled 即视为已暂存」这条断言所依赖的机制在代码里找不到。是否影响真机的
+检测卡显示与模块安装，需单独取证，属独立缺陷，不在本次改动内，未顺手修。
+
+另：`./gradlew :app:lintDebug` 报 1 error / 6 warnings，唯一 error 在
+`app/src/main/AndroidManifest.xml:6`（`QUERY_ALL_PACKAGES`，`ManagerScanner`
+扫描已装管理器所需），改动涉及的四个 Kotlin 文件在 lint 报告里零命中。该项不在
+本仓库对 app 改动的既定门槛（`assembleDebug` + `testDebugUnitTest`）内，仅作额外取证。
+
