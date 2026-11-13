@@ -116,4 +116,65 @@ class ComponentDetectorTest {
         assertEquals("module_active", status.key)
         assertTrue(status.ok)
     }
+
+    @Test
+    fun `a ready status file for this boot reads as activated`() {
+        /* Shape taken from a real device run: the script rewrites the whole file
+         * atomically, so every field is present at once. */
+        val file = File(context.filesDir, "status_ready")
+        file.writeText(
+            """
+            schema=1
+            run_id=1793848818
+            boot_id=$BOOT_ID
+            pid=0
+            state=ready
+            busy=0
+            ready=1
+            error=
+            updated=1793848819
+            """.trimIndent() + "\n",
+        )
+        assertTrue(ComponentDetector.vectorActivated(file, BOOT_ID))
+    }
+
+    @Test
+    fun `a ready file from another boot does not count`() {
+        /* A cold boot drops the injection with the zygote, so yesterday's ready
+         * must not light up the step. */
+        val file = File(context.filesDir, "status_stale_boot")
+        file.writeText("boot_id=OLD-BOOT\nstate=ready\nready=1\n")
+        assertFalse(ComponentDetector.vectorActivated(file, BOOT_ID))
+    }
+
+    @Test
+    fun `failed and mid-run states do not count`() {
+        val failed = File(context.filesDir, "status_failed")
+        failed.writeText("boot_id=$BOOT_ID\nstate=failed\nready=0\nerror=zygote injection gate failed\n")
+        assertFalse(ComponentDetector.vectorActivated(failed, BOOT_ID))
+
+        val installing = File(context.filesDir, "status_installing")
+        installing.writeText("boot_id=$BOOT_ID\nstate=installing\nready=0\n")
+        assertFalse(ComponentDetector.vectorActivated(installing, BOOT_ID))
+    }
+
+    @Test
+    fun `state and ready must agree and the file must exist`() {
+        val halfReady = File(context.filesDir, "status_half")
+        halfReady.writeText("boot_id=$BOOT_ID\nstate=ready\nready=0\n")
+        assertFalse(ComponentDetector.vectorActivated(halfReady, BOOT_ID))
+
+        val noBootId = File(context.filesDir, "status_no_boot")
+        noBootId.writeText("state=ready\nready=1\n")
+        assertFalse(ComponentDetector.vectorActivated(noBootId, BOOT_ID))
+
+        assertFalse(
+            ComponentDetector.vectorActivated(File(context.filesDir, "status_absent2"), BOOT_ID),
+        )
+        assertFalse(ComponentDetector.vectorActivated(halfReady, null))
+    }
+
+    private companion object {
+        const val BOOT_ID = "10138c54-1010-4c13-bf18-a6d5e2615449"
+    }
 }

@@ -4,7 +4,7 @@ import android.content.Context
 import java.io.File
 
 /**
- * Where the ZygiskNext / Vector component packages live for one run.
+ * Where the Vector (and any user-picked) component packages live for one run.
  *
  * The native root script runs as uid 0 but stays in the launcher's SELinux
  * domain, so it cannot read the app's private data dir. The app therefore
@@ -12,7 +12,7 @@ import java.io.File
  * points the native at it through `GHOSTLOCK_LSPD_MODULES`.
  *
  * Publishing is opt-in: with no component packages selected the native skips
- * the whole stack. Installing and activating ZygiskNext/Vector restarts
+ * the whole stack. Installing and activating Vector restarts
  * system_server, and an unlucky ordering there drops the device into
  * recovery, so the plain one-tap root path must never enter that code.
  */

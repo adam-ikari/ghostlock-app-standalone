@@ -33,6 +33,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.util.zip.ZipInputStream
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -50,7 +51,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val DefaultDebugLocation = "Download/ghostlock-debug-log"
         const val PrefForceAttackTest = "force_attack_test"
         const val PrefDebugExportEnabled = "debug_export_enabled"
-        const val KEY_DOWNLOAD_MIRROR = "download_mirror"
         const val PrefDebugExportLocation = "debug_export_location"
         const val PrefDebugKernelLogEnabled = "debug_kernel_log_enabled"
         const val PrefDebugProfileOverrides = "debug_profile_overrides"
@@ -60,6 +60,8 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
          * reach the release hosts itself. The native root script installs them
          * right after the late-load, in the order that keeps the framework up. */
         const val LspdStackAssetDir = "modules"
+        const val BundledManagerAsset = "kernelsu-manager.apk"
+        const val VectorManagerPackage = "org.matrix.vector.manager"
 
         /** Publishing retries while the shared volume is still mounting. */
         const val PUBLISH_ATTEMPTS = 15
@@ -190,7 +192,10 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             for (name in names) {
                 if (!name.endsWith(".zip")) continue
                 val out = File(target, name)
-                if (out.isFile && out.length() > 0) continue
+                // Always (re)stage: `adb install -r` keeps files/modules/, so
+                // a stale zip from the previous APK would otherwise be served
+                // instead of the new asset. Assets are small and the native
+                // install step short-circuits when already activated.
                 runCatching {
                     appContext.assets.open("$LspdStackAssetDir/$name").use { input ->
                         out.outputStream().use { input.copyTo(it) }
@@ -205,7 +210,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
      * user selected no component packages.
      *
      * The native side treats a null as "do not touch the LSPosed stack at
-     * all": installing and activating ZygiskNext/Vector restarts system_server,
+     * all": installing and activating Vector restarts system_server,
      * and an unlucky ordering there drops the device into recovery. Keeping
      * that out of the plain one-tap root path is deliberate — the stack is
      * only brought up when the user actually asked for it.
@@ -275,6 +280,13 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             runCatching {
                 ManagerScanner.scan(appContext.packageManager, appContext.packageName)
             }.getOrDefault(emptyList())
+        }
+
+    override suspend fun vectorManagerInstalled(): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                appContext.packageManager.getPackageInfo(VectorManagerPackage, 0)
+            }.isSuccess
         }
 
     override fun profileController(): ProfileConfigController = profileController
@@ -695,8 +707,8 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     environment()["GHOSTLOCK_PHASE"] = phase
                     if (ksud != null) environment()["GHOSTLOCK_KSUD"] = ksud.absolutePath
                     /* Only when the user actually selected component packages:
-                     * the native root script then installs the ZygiskNext /
-                     * Vector stack and restarts zygote so the injection reaches
+                     * the native root script then installs the Vector
+                     * stack and restarts zygote so the injection reaches
                      * system_server. Leaving this unset keeps the one-tap root
                      * path free of that framework restart, which is what drops
                      * the device into recovery. */
@@ -750,12 +762,71 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override suspend fun fetchKernelSuManager(onLog: (String) -> Unit): String? =
         withContext(Dispatchers.IO) {
-            runCatching { ComponentFetcher.fetchManagerApk(appContext, downloadMirror(), onLog) }
-                .getOrElse { error ->
-                    onLog("KernelSU: fetch failed (${error.message})")
-                    null
+            /* The device cannot reach GitHub itself, so the manager APK ships
+             * inside the APK under assets/. Copy it to cache and verify before
+             * handing it to the package installer. */
+            val dir = File(appContext.cacheDir, "component-apk")
+            if (!dir.isDirectory && !dir.mkdirs()) {
+                onLog("KernelSU: cannot create ${dir.absolutePath}")
+                return@withContext null
+            }
+            val dest = File(dir, "kernelsu-manager.apk")
+            runCatching {
+                appContext.assets.open(BundledManagerAsset).use { input ->
+                    dest.outputStream().use { input.copyTo(it) }
                 }
-                ?.absolutePath
+            }.getOrElse { error ->
+                onLog("KernelSU: cannot read bundled manager (${error.message})")
+                return@withContext null
+            }
+            if (!ComponentFetcher.verifyManagerApk(dest)) {
+                onLog("KernelSU: bundled manager is not a valid APK (${dest.length()} bytes)")
+                return@withContext null
+            }
+            onLog("KernelSU: staged bundled manager (${dest.length()} bytes)")
+            dest.absolutePath
+        }
+
+    override suspend fun fetchVectorManager(onLog: (String) -> Unit): String? =
+        withContext(Dispatchers.IO) {
+            /* The Vector manager APK ships inside the bundled vector.zip under
+             * assets/modules/. Extract just the manager entry to cache and
+             * verify it before handing the path to the package installer. */
+            val dir = File(appContext.cacheDir, "component-apk")
+            if (!dir.isDirectory && !dir.mkdirs()) {
+                onLog("Vector: cannot create ${dir.absolutePath}")
+                return@withContext null
+            }
+            val dest = File(dir, "vector-manager.apk")
+            val found = runCatching {
+                appContext.assets.open("$LspdStackAssetDir/vector.zip").use { stream ->
+                    ZipInputStream(stream).use { zis ->
+                        var entry = zis.nextEntry
+                        while (entry != null) {
+                            if (entry.name == ComponentFetcher.VectorManagerEntry) {
+                                dest.outputStream().use { zis.copyTo(it) }
+                                return@use true
+                            }
+                            zis.closeEntry()
+                            entry = zis.nextEntry
+                        }
+                        false
+                    }
+                }
+            }.getOrElse { error ->
+                onLog("Vector: cannot read bundled zip (${error.message})")
+                return@withContext null
+            }
+            if (!found) {
+                onLog("Vector: manager entry not found in vector.zip")
+                return@withContext null
+            }
+            if (!ComponentFetcher.verifyManagerApk(dest)) {
+                onLog("Vector: extracted manager is not a valid APK (${dest.length()} bytes)")
+                return@withContext null
+            }
+            onLog("Vector: staged bundled manager (${dest.length()} bytes)")
+            dest.absolutePath
         }
 
     override suspend fun detectComponents(): List<ComponentDetector.Status> =
@@ -766,37 +837,8 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     override suspend fun deviceHasRoot(): Boolean =
         withContext(Dispatchers.IO) { ComponentDetector.moduleActive(appContext) }
 
-    /** Reverse-proxy prefix used for component downloads; empty means direct. */
-    override fun downloadMirror(): String =
-        appContext.getSharedPreferences("ghostlock_prefs", Context.MODE_PRIVATE)
-            .getString(KEY_DOWNLOAD_MIRROR, null)
-            .orEmpty()
-
-    override fun setDownloadMirror(prefix: String) {
-        appContext.getSharedPreferences("ghostlock_prefs", Context.MODE_PRIVATE)
-            .edit { putString(KEY_DOWNLOAD_MIRROR, prefix.trim()) }
-    }
-
-    /**
-     * Downloads one component package from its upstream release.
-     *
-     * The package is verified (module.prop id + size) before it replaces the
-     * copy on disk, so a failed download leaves a previously working package
-     * untouched.
-     */
-    override suspend fun fetchModulePackage(key: String, onLog: (String) -> Unit): Boolean =
-        withContext(Dispatchers.IO) {
-            val component = ComponentFetcher.byKey(key)
-            if (component == null) {
-                onLog("component packages: unknown component '$key'")
-                return@withContext false
-            }
-            runCatching { ComponentFetcher.fetch(appContext, component, downloadMirror(), onLog) }
-                .getOrElse { error ->
-                    onLog("${component.label}: fetch failed (${error.message})")
-                    false
-                }
-        }
+    override suspend fun vectorReady(): Boolean =
+        withContext(Dispatchers.IO) { ComponentDetector.vectorReady(appContext) }
 
     override suspend fun cacheDocument(uri: String, fileName: String): String {
         val target = File(filesDir, fileName)

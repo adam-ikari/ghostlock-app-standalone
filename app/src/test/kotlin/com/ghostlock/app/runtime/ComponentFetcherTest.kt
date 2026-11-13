@@ -104,13 +104,17 @@ class ComponentFetcherTest {
     }
 
     @Test
-    fun `the bundled components are the ones the root script installs`() {
+    fun `the fetchable component is the bundled Vector zip`() {
+        /* ReZygisk ships bundled (assets/modules/rezygisk.zip) but publishes no
+         * update.json, so it is not a fetchable component. Vector is bundled
+         * and has an upstream update.json; the fetch only pulls a newer build
+         * and is skipped when a matching zip is already staged. */
         assertEquals(
-            listOf("rezygisk.zip", "vector.zip"),
+            listOf("vector.zip"),
             ComponentFetcher.Defaults.map { it.fileName },
         )
         assertEquals(
-            listOf("rezygisk", "zygisk_vector"),
+            listOf("zygisk_vector"),
             ComponentFetcher.Defaults.map { it.moduleId },
         )
     }

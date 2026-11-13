@@ -187,7 +187,6 @@ private fun GhostlockRoute(
         actions = object : GhostlockActions {
             override fun onGetRoot() = viewModel.onGetRoot()
             override fun onActivateFramework() = viewModel.onActivateFramework()
-            override fun onSoftReboot() = viewModel.onSoftReboot()
             override fun onProfileInvalid() = viewModel.onProfileInvalid()
             override fun onCloseExecutionSheet() = viewModel.onCloseExecutionSheet()
             override fun onCopyLogs() = viewModel.copyLogs()
@@ -205,9 +204,8 @@ private fun GhostlockRoute(
 
             override fun onOpenManagerPicker() = viewModel.onOpenManagerPicker()
             override fun onPickModuleZip() = viewModel.onPickModuleZip()
-            override fun onFetchModulePackage(key: String) = viewModel.onFetchModulePackage(key)
-            override fun onSetDownloadMirror() = viewModel.onSetDownloadMirror()
             override fun onFetchKernelSuManager() = viewModel.onFetchKernelSuManager()
+            override fun onFetchVectorManager() = viewModel.onFetchVectorManager()
             override fun onDetectComponents() = viewModel.onDetectComponents()
             override fun onCloseManagerPicker() = viewModel.onCloseManagerPicker()
             override fun onManagerSelected(pkg: String?) = viewModel.onManagerSelected(pkg)

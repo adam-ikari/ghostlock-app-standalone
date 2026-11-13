@@ -32,14 +32,54 @@ object ComponentDetector {
 
     /**
      * The version string of a staged, verified component zip, or `null` when
-     * the zip is absent / too small / fails `module.prop` verification.
+     * none is usable. Three sources, in order:
      *
-     * Reads `<filesDir>/modules/<fileName>`; the staging dir and naming are
-     * owned by [ComponentFetcher.fetch], so this stays in lock-step with it.
+     * 1. A staged copy named `<fileName>` under `<filesDir>/modules/`.
+     * 2. Any `*.zip` there whose `module.prop` id matches (the file picker keeps
+     *    the original name, and the native script installs every zip in the dir).
+     * 3. The bundled asset `assets/modules/<fileName>` — a fresh install must
+     *    not report the shipped modules "missing" and send the user off to
+     *    fetch something that is already on disk inside the APK.
      */
     fun stagedVersion(context: Context, component: ComponentFetcher.Component): String? {
-        val zip = File(context.filesDir, "modules/${component.fileName}")
-        return ComponentFetcher.verifyZip(zip, component.moduleId)
+        val modulesDir = File(context.filesDir, "modules")
+        val exact = File(modulesDir, component.fileName)
+        if (exact.isFile) {
+            ComponentFetcher.verifyZip(exact, component.moduleId)?.let { return it }
+        }
+        if (modulesDir.isDirectory) {
+            modulesDir.listFiles { file -> file.isFile && file.name.endsWith(".zip") }
+                ?.forEach { zip ->
+                    if (zip.name != component.fileName) {
+                        ComponentFetcher.verifyZip(zip, component.moduleId)?.let { return it }
+                    }
+                }
+        }
+        return runCatching {
+            context.assets.open("modules/${component.fileName}").use { input ->
+                java.util.zip.ZipInputStream(input).use { zis ->
+                    var entry = zis.nextEntry
+                    var version: String? = null
+                    while (entry != null) {
+                        if (entry.name == "module.prop") {
+                            val props = zis.bufferedReader().readText()
+                            val hasId = props.lineSequence()
+                                .firstOrNull { it.startsWith("id=") }
+                                ?.removePrefix("id=")?.trim()
+                            if (hasId == component.moduleId) {
+                                version = props.lineSequence()
+                                    .firstOrNull { it.startsWith("version=") }
+                                    ?.removePrefix("version=")?.trim()
+                            }
+                            break
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                    version
+                }
+            }
+        }.getOrNull()
     }
 
     /**
@@ -87,6 +127,29 @@ object ComponentDetector {
     }.getOrDefault(false)
 
     /**
+     * Whether the root script recorded a finished Vector activation for this
+     * boot. Three fields must agree: `state=ready`, `ready=1`, and a `boot_id`
+     * equal to the current boot's.
+     *
+     * Unlike [rootedInThisBoot] this *does* consult `state`: the script writes
+     * `ready` only on the paths that verified the injection, and a supervisor
+     * that died mid-run leaves `starting`/`installing`, which must not light up
+     * the step. The residual false positive — a `ready` file whose injection has
+     * since been lost — is bounded by the reboot phase, which re-verifies and
+     * fails closed on its own.
+     */
+    internal fun vectorActivated(statusFile: File, currentBootId: String?): Boolean {
+        if (currentBootId == null) return false
+        val recorded = statusField(statusFile, "boot_id") ?: return false
+        val state = statusField(statusFile, "state") ?: return false
+        val ready = statusField(statusFile, "ready") ?: return false
+        return recorded == currentBootId && state == "ready" && ready == "1"
+    }
+
+    fun vectorReady(context: Context): Boolean =
+        vectorActivated(File(context.filesDir, ".ghostlock_status"), currentBootId())
+
+    /**
      * Value of the `key=value` line [key] in [file], or `null`. A flat
      * `key=value` list written by the root script, so it is parsed by hand
      * rather than through a properties parser that would also accept the
@@ -131,27 +194,19 @@ object ComponentDetector {
     }.getOrDefault(false)
 
     /**
-     * Runs all three checks and returns a ready-to-render list, in the order
-     * the card shows them: ZygiskNext, Vector, manager, module.
+     * Runs all checks and returns a ready-to-render list, in the order the
+     * card shows them: Vector staged, manager, module active.
      */
     fun detectAll(
         context: Context,
         pm: PackageManager,
         selfPackage: String,
     ): List<Status> {
-        val zygiskNext = ComponentFetcher.byKey(ComponentFetcher.ZygiskNextKey)!!
         val vector = ComponentFetcher.byKey(ComponentFetcher.VectorKey)!!
-        val stagedZygiskNext = stagedVersion(context, zygiskNext)
         val stagedVector = stagedVersion(context, vector)
         val manager = installedManager(pm, selfPackage)
         val active = moduleActive(context)
         return listOf(
-            Status(
-                key = "zygisknext_staged",
-                label = zygiskNext.label,
-                detail = stagedZygiskNext,
-                ok = stagedZygiskNext != null,
-            ),
             Status(
                 key = "vector_staged",
                 label = vector.label,

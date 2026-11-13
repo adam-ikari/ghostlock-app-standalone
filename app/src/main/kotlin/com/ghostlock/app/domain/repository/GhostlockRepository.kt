@@ -57,37 +57,32 @@ interface GhostlockRepository {
     /**
      * Copies a picked module zip into the runtime home's modules/ directory.
      *
-     * The app never ships the Zygisk / LSPosed packages itself: ZygiskNext has
-     * been "all rights reserved" since v4-0.9.2 and its README forbids
-     * redistribution, while Vector is GPL-3.0 and this app is Apache-2.0. The
-     * user picks the zips (or fetches them, see below) and the native root
-     * script installs them.
+     * The bundled stack is the ReZygisk + Vector pair, shipped inside the APK
+     * under `assets/modules/`; the user may also pick a zip manually, and the
+     * native root script installs whatever is in the staging dir.
      */
     suspend fun stageModuleZip(uri: String, name: String): String =
         cacheDocument(uri, name)
 
     /**
-     * Downloads one component package (see `ComponentFetcher.byKey`) from the
-     * release its author publishes into the module staging directory.
-     *
-     * Fetching is not redistribution: the bytes go from the rights holder to the
-     * user's own device. A package that is already staged is left alone, so a
-     * second tap never replaces a version that works.
-     */
-    suspend fun fetchModulePackage(key: String, onLog: (String) -> Unit): Boolean
-
-    /**
-     * Reverse-proxy prefix for component downloads, empty when downloads go
-     * straight upstream. Public accelerators take either `https://mirror/` (the
-     * url is appended) or `https://mirror/?u={url}`.
-     */
-    /**
-     * Downloads the KernelSU manager APK into the app cache and returns its
-     * path, or null when it could not be fetched and verified. The UI hands the
-     * path to the package installer: the manager is the one component that must
-     * be an installed app, because the root script loads `libksud.so` from it.
+     * Copies the bundled KernelSU manager APK from `assets/` into the app cache
+     * and returns its path, or null when the bundled copy is missing or not a
+     * valid APK. The UI hands the path to the package installer: the manager is
+     * the one component that must be an installed app, because the root script
+     * loads `libksud.so` from it.
      */
     suspend fun fetchKernelSuManager(onLog: (String) -> Unit): String?
+
+    /**
+     * Extracts the Vector manager APK from the bundled `assets/modules/vector.zip`
+     * into the app cache and returns its path, or null when the entry is missing
+     * or not a valid APK. The UI hands the path to the package installer so the
+     * user can install the Vector companion app without activating the module first.
+     */
+    suspend fun fetchVectorManager(onLog: (String) -> Unit): String?
+
+    /** Whether the Vector manager companion app is installed. */
+    suspend fun vectorManagerInstalled(): Boolean
 
     /**
      * Checks, without running the exploit, which parts of the root stack are
@@ -105,9 +100,12 @@ interface GhostlockRepository {
      */
     suspend fun deviceHasRoot(): Boolean
 
-    fun downloadMirror(): String
-
-    fun setDownloadMirror(prefix: String)
+    /**
+     * Whether the root script's status file records a verified Vector activation
+     * for this boot. The app's in-memory flag cannot survive a restart, so the
+     * persisted file is the only cold-start evidence that step 2 is already done.
+     */
+    suspend fun vectorReady(): Boolean
 
     suspend fun publishOffsets(candidate: OffsetCandidate): String
 

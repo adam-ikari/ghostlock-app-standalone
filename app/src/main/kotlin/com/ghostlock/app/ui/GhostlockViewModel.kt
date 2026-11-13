@@ -22,7 +22,6 @@ import com.ghostlock.app.domain.usecase.ParseSourceUseCase
 import com.ghostlock.app.domain.usecase.ReadDocumentUseCase
 import com.ghostlock.app.domain.usecase.RunExploitUseCase
 import com.ghostlock.app.domain.usecase.SelectCpuPairUseCase
-import com.ghostlock.app.runtime.ComponentFetcher
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -77,6 +76,8 @@ class GhostlockViewModel(
     private var running = false
     /** Set when a run reported that the device is already rooted. */
     private var alreadyRooted = false
+    /** The companion-manager prompt is shown once per process. */
+    private var managerPromptShown = false
     private val loadKernelSnapshot = LoadKernelSnapshotUseCase(repository)
     private val selectCpuPairUseCase = SelectCpuPairUseCase(repository)
     private val importOffsetsUseCase = ImportOffsetsUseCase(repository)
@@ -861,39 +862,9 @@ class GhostlockViewModel(
      */
     fun onPickModuleZip() = send(GhostlockEffect.PickDocument(DocumentRequest.ModuleZip))
 
-    /** True while the download-proxy picker owns the next item selection. */
-    private var mirrorPickerPending = false
-
     /**
-     * Picks the reverse proxy used for component downloads.
-     *
-     * Upstream lives on GitHub, which is slow or unreachable on some networks;
-     * a proxy prefix routes both the update.json and the zip through it. The
-     * proxy sees and can replace the package, and these packages are installed
-     * as root, so the choice is a fixed list of known accelerators instead of
-     * free-form input.
-     */
-    fun onSetDownloadMirror() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val current = runCatching { repository.downloadMirror() }.getOrDefault("").trim()
-            val presets = ComponentFetcher.MirrorPresets
-            withContext(Dispatchers.Main) {
-                mirrorPickerPending = true
-                mutableState.update {
-                    it.copy(
-                        dialogVisible = true,
-                        dialogType = DialogType.LIST,
-                        dialogTitleRes = R.string.download_mirror_title,
-                        dialogItems = presets.map { if (it.isEmpty()) "direct" else it },
-                        dialogCurrentItemIndex = presets.indexOf(current).coerceAtLeast(0),
-                    )
-                }
-            }
-        }
-    }
-
-    /**
-     * Fetches the KernelSU manager APK and opens the package installer.
+     * Copies the bundled KernelSU manager APK out of `assets/` and opens the
+     * package installer.
      *
      * No root is involved on purpose: installing an app is the user's decision,
      * and a root-held `pm install` would install silently behind their back.
@@ -902,7 +873,7 @@ class GhostlockViewModel(
      */
     fun onFetchKernelSuManager() {
         viewModelScope.launch(Dispatchers.IO) {
-            appendLog("KernelSU manager: fetching from the upstream release")
+            appendLog("KernelSU manager: staging the bundled APK")
             send(GhostlockEffect.Toast(R.string.module_fetch_started))
             val path = runCatching { repository.fetchKernelSuManager { appendLog(it) } }
                 .getOrElse { error ->
@@ -918,33 +889,21 @@ class GhostlockViewModel(
         }
     }
 
-
-    /**
-     * Fetches one component package from the release its author publishes.
-     *
-     * ZygiskNext cannot be bundled (all rights reserved since v4-0.9.2, "no
-     * redistribution"), so the app downloads it instead of carrying it. Vector
-     * is fetched the same way so both buttons behave identically; a package
-     * that is already staged is skipped rather than replaced.
-     */
-    fun onFetchModulePackage(key: String) {
+    fun onFetchVectorManager() {
         viewModelScope.launch(Dispatchers.IO) {
-            appendLog("component package '$key': fetching from upstream release")
+            appendLog("Vector manager: extracting from bundled zip")
             send(GhostlockEffect.Toast(R.string.module_fetch_started))
-            val ok = runCatching { repository.fetchModulePackage(key) { appendLog(it) } }
+            val path = runCatching { repository.fetchVectorManager { appendLog(it) } }
                 .getOrElse { error ->
-                    appendLog("component package '$key': ${error.message}")
-                    false
+                    appendLog("Vector manager: ${error.message}")
+                    null
                 }
-            appendLog(
-                if (ok) "component package '$key': ready — pick nothing, just run"
-                else "component package '$key': failed (see the lines above)",
-            )
-            send(
-                GhostlockEffect.Toast(
-                    if (ok) R.string.module_fetch_done else R.string.module_fetch_failed,
-                ),
-            )
+            if (path == null) {
+                appendLog("Vector manager: failed (see the lines above)")
+                send(GhostlockEffect.Toast(R.string.module_fetch_failed))
+            } else {
+                send(GhostlockEffect.InstallApk(path))
+            }
         }
     }
 
@@ -1009,12 +968,6 @@ class GhostlockViewModel(
     /** Install the Zygisk / Vector stack, restart zygote, start the Vector
      *  daemon and verify. Requires temporary root to already be present. */
     fun onActivateFramework() = runExploit(phase = "activate", needsRoot = true)
-
-    /** Restart zygote while keeping the existing root and modules. Gated on a
-     *  successful activation: restarting zygote without the Vector stack in
-     *  place would leave the device without the injection it is meant to
-     *  preserve, so this only runs after Vector reported ready. */
-    fun onSoftReboot() = runExploit(phase = "reboot", needsRoot = true)
 
     private fun runExploit(phase: String, needsRoot: Boolean) {
         val current = state.value
@@ -1204,11 +1157,6 @@ class GhostlockViewModel(
 
     fun onDialogItemSelected(index: Int) {
         dismissDialog()
-        if (mirrorPickerPending) {
-            mirrorPickerPending = false
-            ComponentFetcher.MirrorPresets.getOrNull(index)?.let(::saveDownloadMirror)
-            return
-        }
         when (parseDialogStage) {
             ParseDialogStage.Mode -> when (index) {
                 0 -> pickPayload()
@@ -1240,25 +1188,7 @@ class GhostlockViewModel(
     }
 
     fun onDialogDismiss() {
-        mirrorPickerPending = false
         dismissDialog()
-    }
-
-    private fun saveDownloadMirror(value: String) {
-        val prefix = value.trim()
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { repository.setDownloadMirror(prefix) }
-                .onSuccess {
-                    appendLog(
-                        if (prefix.isEmpty()) {
-                            "downloads: direct (no proxy)"
-                        } else {
-                            "downloads: via proxy $prefix"
-                        },
-                    )
-                }
-                .onFailure { appendLog("downloads: cannot save proxy (${it.message})") }
-        }
     }
 
     fun onDialogDismissFinished() {
@@ -1282,10 +1212,19 @@ class GhostlockViewModel(
             runCatching { profileController.load(snapshot.kernelRelease, pair) }.getOrNull()
         }
         val managers = withContext(Dispatchers.IO) { repository.installedManagers() }
+        val vectorManager = withContext(Dispatchers.IO) {
+            runCatching { repository.vectorManagerInstalled() }.getOrDefault(false)
+        }
         /* Probe the root state directly: the native log line only appears once
            the exploit has already started, so it cannot gate the button. */
         alreadyRooted = withContext(Dispatchers.IO) {
             runCatching { repository.deviceHasRoot() }.getOrDefault(false)
+        }
+        /* Step 2 is re-derived from the status file, not from a remembered tap:
+         * the script writes `ready` before it exits 0, so the file is the
+         * authority and survives an app restart. */
+        val vectorReady = withContext(Dispatchers.IO) {
+            runCatching { repository.vectorReady() }.getOrDefault(false)
         }
         kernelSnapshot = snapshot
         mutableState.update {
@@ -1302,13 +1241,33 @@ class GhostlockViewModel(
                 executionHasProfile = loaded?.hasProfile ?: false,
                 customCpuPair = loaded?.let(::customCpuPairOf),
                 selectedManagerPackage = repository.selectedManagerPackage(),
+                kernelSuManagerInstalled = managers.any { it.hasKsud },
+                vectorManagerInstalled = vectorManager,
                 rootActive = alreadyRooted,
+                vectorActive = vectorReady,
                 runChecks = runChecksOf(
                     snapshot = snapshot,
                     hasProfile = loaded?.hasProfile == true,
                     invalidPaths = loaded?.invalidPaths ?: emptySet(),
                     managers = managers,
                 ),
+            )
+        }
+        promptMissingManagers(
+            hasKernelSuManager = managers.any { it.hasKsud },
+            hasVectorManager = vectorManager,
+        )
+    }
+
+    /** One prompt per process when a bundled companion app is missing. */
+    private fun promptMissingManagers(hasKernelSuManager: Boolean, hasVectorManager: Boolean) {
+        if (managerPromptShown || (hasKernelSuManager && hasVectorManager)) return
+        managerPromptShown = true
+        mutableState.update {
+            it.copy(
+                dialogVisible = true,
+                dialogType = DialogType.MANAGERS,
+                dialogTitleRes = R.string.manager_guide_title,
             )
         }
     }

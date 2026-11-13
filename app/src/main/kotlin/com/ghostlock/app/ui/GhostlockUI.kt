@@ -66,11 +66,9 @@ import com.ghostlock.app.domain.model.ProfileFieldNode
 import com.ghostlock.app.domain.model.RunCheck
 import com.ghostlock.app.domain.model.UserProfileFile
 import com.ghostlock.app.runtime.ComponentDetector
-import com.ghostlock.app.runtime.ComponentFetcher
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -95,8 +93,6 @@ import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -181,6 +177,9 @@ data class GhostlockUiState(
     val managerPickerVisible: Boolean = false,
     /** Pre-flight requirements of the one-tap run. */
     val runChecks: List<com.ghostlock.app.domain.model.RunCheck> = emptyList(),
+    /** Companion managers the setup flow installs from bundled assets. */
+    val kernelSuManagerInstalled: Boolean = false,
+    val vectorManagerInstalled: Boolean = false,
     /** Per-component detection rows; empty until the user taps "检测". */
     val componentStatuses: List<ComponentDetector.Status> = emptyList(),
     val componentDetecting: Boolean = false,
@@ -195,14 +194,13 @@ data class GhostlockUiState(
     val setupError: String? = null,
 )
 
-enum class DialogType { NONE, LIST, INPUT, NOTICE }
+enum class DialogType { NONE, LIST, INPUT, NOTICE, MANAGERS }
 
 data class GhostlockLogLine(val text: String, val color: Int)
 
 interface GhostlockActions {
     fun onGetRoot()
     fun onActivateFramework()
-    fun onSoftReboot()
     fun onProfileInvalid()
     fun onCloseExecutionSheet()
     fun onCopyLogs()
@@ -215,10 +213,9 @@ interface GhostlockActions {
     fun onSafeModeChanged(enabled: Boolean)
     fun onForceAttackTestChanged(enabled: Boolean)
     fun onPickModuleZip()
-    fun onFetchModulePackage(key: String)
-    fun onSetDownloadMirror()
     fun onFetchKernelSuManager()
     fun onDetectComponents()
+    fun onFetchVectorManager()
 
     fun onOpenManagerPicker()
     fun onCloseManagerPicker()
@@ -750,6 +747,34 @@ private fun GhostlockDialog(
                     }
                 }
 
+                DialogType.MANAGERS -> {
+                    if (!state.kernelSuManagerInstalled) {
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            text = stringResource(R.string.manager_guide_kernelsu),
+                            onClick = {
+                                actions.onDialogDismiss()
+                                actions.onFetchKernelSuManager()
+                            },
+                        )
+                    }
+                    if (!state.vectorManagerInstalled) {
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            text = stringResource(R.string.manager_guide_vector),
+                            onClick = {
+                                actions.onDialogDismiss()
+                                actions.onFetchVectorManager()
+                            },
+                        )
+                    }
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = stringResource(R.string.manager_prompt_later),
+                        onClick = actions::onDialogDismiss,
+                    )
+                }
+
                 DialogType.NONE -> Unit
             }
         },
@@ -835,71 +860,23 @@ private fun ControlPanel(
                 .fillMaxWidth()
                 .padding(top = 12.dp),
         )
+        if (!state.kernelSuManagerInstalled || !state.vectorManagerInstalled) {
+            ManagerSetupCard(
+                kernelSuInstalled = state.kernelSuManagerInstalled,
+                vectorInstalled = state.vectorManagerInstalled,
+                onInstallKernelSu = actions::onFetchKernelSuManager,
+                onInstallVector = actions::onFetchVectorManager,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            )
+        }
         RunCheckCard(
             checks = state.runChecks,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 12.dp),
         )
-        Card(modifier = modifier.padding(top = 12.dp)) {
-            val chosenLabel = state.managerCandidates
-                .firstOrNull { it.packageName == state.selectedManagerPackage }
-                ?.label
-                ?: state.selectedManagerPackage
-            ArrowPreference(
-                title = stringResource(R.string.manager_label),
-                summary = chosenLabel ?: stringResource(R.string.manager_summary_auto),
-                onClick = actions::onOpenManagerPicker,
-            )
-            if (state.cpuPairLabels.isNotEmpty()) {
-                val customPair = state.customCpuPair
-                val customSummary = customPair?.let {
-                    stringResource(
-                        R.string.cpu_pair_custom,
-                        "${it.primary}, ${it.consumer}",
-                    )
-                }
-                OverlaySpinnerPreference(
-                    title = stringResource(R.string.cpu_pair_label),
-                    items = state.cpuPairLabels.map { DropdownItem(icon = null, title = it) },
-                    selectedIndex = if (customPair == null) state.cpuPairIndex else -1,
-                    summary = customSummary,
-                    showValue = customPair == null,
-                    onSelectedIndexChange = actions::onCpuPairSelected,
-                )
-            }
-            ArrowPreference(
-                title = stringResource(R.string.module_zips_fetch_zygisknext_label),
-                summary = stringResource(R.string.module_zips_fetch_zygisknext_summary),
-                onClick = { actions.onFetchModulePackage(ComponentFetcher.ZygiskNextKey) },
-            )
-            ArrowPreference(
-                title = stringResource(R.string.module_zips_fetch_vector_label),
-                summary = stringResource(R.string.module_zips_fetch_vector_summary),
-                onClick = { actions.onFetchModulePackage(ComponentFetcher.VectorKey) },
-            )
-            ArrowPreference(
-                title = stringResource(R.string.module_fetch_kernelsu_label),
-                summary = stringResource(R.string.module_fetch_kernelsu_summary),
-                onClick = actions::onFetchKernelSuManager,
-            )
-            ArrowPreference(
-                title = stringResource(R.string.download_mirror_label),
-                summary = stringResource(R.string.download_mirror_summary),
-                onClick = actions::onSetDownloadMirror,
-            )
-            ArrowPreference(
-                title = stringResource(R.string.module_zips_label),
-                summary = stringResource(R.string.module_zips_summary),
-                onClick = actions::onPickModuleZip,
-            )
-            SwitchPreference(
-                checked = state.safeModeEnabled,
-                onCheckedChange = actions::onSafeModeChanged,
-                title = stringResource(R.string.safe_mode_label),
-                summary = stringResource(R.string.safe_mode_summary),
-            )
-        }
         ComponentDetectCard(
             statuses = state.componentStatuses,
             detecting = state.componentDetecting,
@@ -948,29 +925,32 @@ private fun SetupFlowCard(
                 color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.68f),
                 modifier = Modifier.padding(bottom = 12.dp),
             )
+            if (state.setupBusy && state.setupState == "activate") {
+                Text(
+                    text = stringResource(R.string.setup_activate_progress),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
             SetupStepButton(
                 index = 1,
                 labelRes = R.string.action_get_root,
+                subtitleRes = R.string.step_get_root_desc,
                 done = state.rootActive,
                 enabled = !busy && !profileBlocked,
+                current = !state.rootActive,
                 onClick = actions::onGetRoot,
                 onBlockedClick = actions::onProfileInvalid,
             )
             SetupStepButton(
                 index = 2,
                 labelRes = R.string.action_activate_framework,
+                subtitleRes = R.string.step_activate_desc,
                 done = state.vectorActive,
                 enabled = !busy && !profileBlocked && state.rootActive,
+                current = state.rootActive && !state.vectorActive,
                 onClick = actions::onActivateFramework,
-                onBlockedClick = actions::onProfileInvalid,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            SetupStepButton(
-                index = 3,
-                labelRes = R.string.action_soft_reboot,
-                done = false,
-                enabled = !busy && state.vectorActive,
-                onClick = actions::onSoftReboot,
                 onBlockedClick = actions::onProfileInvalid,
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -986,31 +966,122 @@ private fun SetupFlowCard(
     }
 }
 
+/**
+ * Prompts for the two companion managers the flow depends on.
+ *
+ * Only the missing ones are listed: the KernelSU manager supplies `ksud` for
+ * the late-load and the su handoff, and the Vector manager is the app that
+ * talks to the injected framework. Both APKs ship inside this APK, so the
+ * action is a single tap — no download.
+ */
+@Composable
+private fun ManagerSetupCard(
+    kernelSuInstalled: Boolean,
+    vectorInstalled: Boolean,
+    onInstallKernelSu: () -> Unit,
+    onInstallVector: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier) {
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 16.dp)) {
+            Text(
+                text = stringResource(R.string.manager_guide_title),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            if (!kernelSuInstalled) {
+                ManagerInstallRow(
+                    name = stringResource(R.string.manager_guide_kernelsu),
+                    detail = stringResource(R.string.manager_guide_kernelsu_hint),
+                    onClick = onInstallKernelSu,
+                )
+            }
+            if (!vectorInstalled) {
+                ManagerInstallRow(
+                    name = stringResource(R.string.manager_guide_vector),
+                    detail = stringResource(R.string.manager_guide_vector_hint),
+                    onClick = onInstallVector,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ManagerInstallRow(name: String, detail: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = detail,
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Text(
+            text = stringResource(R.string.manager_guide_install),
+            fontSize = 13.sp,
+            color = MiuixTheme.colorScheme.primary,
+        )
+    }
+}
+
 @Composable
 private fun SetupStepButton(
     index: Int,
     labelRes: Int,
+    subtitleRes: Int,
     done: Boolean,
     enabled: Boolean,
+    current: Boolean,
     onClick: () -> Unit,
     onBlockedClick: () -> Unit,
     modifier: Modifier = Modifier,
+    optional: Boolean = false,
 ) {
-    val bgColor = if (enabled) MiuixTheme.colorScheme.primary
+    val bgColor = if (optional) {
+        if (enabled) MiuixTheme.colorScheme.surfaceVariant else MiuixTheme.colorScheme.disabledPrimaryButton
+    } else if (enabled) MiuixTheme.colorScheme.primary
     else MiuixTheme.colorScheme.disabledPrimaryButton
-    val fgColor = if (enabled) MiuixTheme.colorScheme.onPrimary
+    val fgColor = if (optional && enabled) MiuixTheme.colorScheme.onBackgroundVariant
+    else if (enabled) MiuixTheme.colorScheme.onPrimary
     else MiuixTheme.colorScheme.disabledOnPrimaryButton
     val label = "$index. " + stringResource(labelRes) + if (done) "  ✓" else ""
-    Box(
+    val borderColor = if (current) MiuixTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
             .clickable(enabled = enabled) { onClick() }
-            .padding(vertical = 12.dp, horizontal = 16.dp),
-        contentAlignment = Alignment.Center,
+            .padding(vertical = 10.dp, horizontal = 16.dp),
     ) {
-        Text(text = label, color = fgColor, fontSize = 15.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = label, color = fgColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (current && !done) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.step_tap_here),
+                    color = fgColor.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                )
+            }
+        }
+        Text(
+            text = stringResource(subtitleRes),
+            color = fgColor.copy(alpha = 0.72f),
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 2.dp),
+        )
     }
 }
 
