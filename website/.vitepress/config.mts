@@ -2,11 +2,11 @@ import { defineConfig } from 'vitepress'
 
 const base = process.env.VP_BASE || '/ghostlock-site/'
 const hostname = process.env.VP_HOST || 'https://adam-ikari.github.io'
-const APK = 'apk/GhostLock-v1.2(649)-arm64-v8a-release.apk'
+const APK = 'apk/GhostLock-v1.2(650)-arm64-v8a-release.apk'
 
 export default defineConfig({
   lang: 'zh-CN',
-  title: 'GhostLock v1.2 (649) — Titan 2 临时 root',
+  title: 'GhostLock v1.2 (650) — Titan 2 临时 root',
   description: '仅适配 Unihertz Titan 2：利用 CVE-2026-43499 取得临时 root，内存加载 KernelSU。不解锁 bootloader，不刷 boot，重启即失效。',
   base,
   cleanUrls: true,
@@ -23,13 +23,13 @@ export default defineConfig({
     ['link', { rel: 'canonical', href: hostname + base }],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: 'GhostLock' }],
-    ['meta', { property: 'og:title', content: 'GhostLock v1.2 (649) — Titan 2 临时 root' }],
+    ['meta', { property: 'og:title', content: 'GhostLock v1.2 (650) — Titan 2 临时 root' }],
     ['meta', { property: 'og:description', content: '仅适配 Unihertz Titan 2。CVE-2026-43499 临时 root + KernelSU 内存加载，全离线，重启即失效。' }],
     ['meta', { property: 'og:url', content: hostname + base }],
     ['meta', { property: 'og:image', content: hostname + base + 'og.png' }],
     ['meta', { property: 'og:locale', content: 'zh_CN' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['meta', { name: 'twitter:title', content: 'GhostLock v1.2 (649) — Titan 2 临时 root' }],
+    ['meta', { name: 'twitter:title', content: 'GhostLock v1.2 (650) — Titan 2 临时 root' }],
     ['meta', { name: 'twitter:description', content: '仅适配 Unihertz Titan 2。CVE-2026-43499 临时 root + KernelSU 内存加载，全离线，重启即失效。' }],
     ['meta', { name: 'twitter:image', content: hostname + base + 'og.png' }],
     ['link', { rel: 'icon', type: 'image/svg+xml', href: base + 'favicon.svg' }],
@@ -40,7 +40,7 @@ export default defineConfig({
       applicationCategory: 'UtilitiesApplication',
       operatingSystem: 'Android 16 (Unihertz Titan 2)',
       description: '仅适配 Unihertz Titan 2：利用 CVE-2026-43499 取得临时 root 并加载 KernelSU。',
-      softwareVersion: '1.2 (649)',
+      softwareVersion: '1.2 (650)',
       license: 'https://www.gnu.org/licenses/gpl-3.0.html',
     })],
   ],
