@@ -180,6 +180,8 @@ data class GhostlockUiState(
     /** Companion managers the setup flow installs from bundled assets. */
     val kernelSuManagerInstalled: Boolean = false,
     val vectorManagerInstalled: Boolean = false,
+    /** This app context holds a KernelSU `su` grant (needed by activate). */
+    val suGranted: Boolean = true,
     /** Per-component detection rows; empty until the user taps "检测". */
     val componentStatuses: List<ComponentDetector.Status> = emptyList(),
     val componentDetecting: Boolean = false,
@@ -194,7 +196,7 @@ data class GhostlockUiState(
     val setupError: String? = null,
 )
 
-enum class DialogType { NONE, LIST, INPUT, NOTICE, MANAGERS }
+enum class DialogType { NONE, LIST, INPUT, NOTICE, MANAGERS, SU_AUTH }
 
 data class GhostlockLogLine(val text: String, val color: Int)
 
@@ -216,6 +218,8 @@ interface GhostlockActions {
     fun onFetchKernelSuManager()
     fun onDetectComponents()
     fun onFetchVectorManager()
+    fun onOpenKernelSuManager()
+    fun onRetrySuAuthorization()
 
     fun onOpenManagerPicker()
     fun onCloseManagerPicker()
@@ -745,6 +749,40 @@ private fun GhostlockDialog(
                             onClick = actions::onDialogDismiss,
                         )
                     }
+                }
+
+                DialogType.SU_AUTH -> {
+                    Text(
+                        text = stringResource(R.string.su_auth_message),
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    TextButton(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, bottom = 12.dp),
+                        text = stringResource(R.string.su_auth_open_manager),
+                        onClick = {
+                            actions.onDialogDismiss()
+                            actions.onOpenKernelSuManager()
+                        },
+                    )
+                    TextButton(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        text = stringResource(R.string.su_auth_retry),
+                        onClick = {
+                            actions.onDialogDismiss()
+                            actions.onRetrySuAuthorization()
+                        },
+                    )
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = stringResource(R.string.manager_prompt_later),
+                        onClick = actions::onDialogDismiss,
+                    )
                 }
 
                 DialogType.MANAGERS -> {
@@ -1345,6 +1383,7 @@ private fun RunCheckCard(
                     RunCheckIds.KERNEL -> R.string.check_kernel
                     RunCheckIds.PROFILE -> R.string.check_profile
                     RunCheckIds.KERNELSU_MANAGER -> R.string.check_kernelsu_manager
+                    RunCheckIds.SU_GRANTED -> R.string.check_su_granted
                     RunCheckIds.ALREADY_ROOTED -> R.string.check_already_rooted
                     else -> R.string.check_kernel
                 }

@@ -84,6 +84,11 @@
     <string name="check_state_optional">可选：不满足也能拿 root，只是没法加载模块</string>
     <string name="check_kernel">内核受支持</string>
     <string name="check_profile">profile 已匹配且字段合法</string>
+    <string name="check_su_granted">GhostLock 已获 KernelSU 授权（su）</string>
+    <string name="su_auth_title">需要授予 root 权限</string>
+    <string name="su_auth_message">KernelSU 尚未允许 GhostLock 使用 su，激活 Vector 会失败。请打开 KernelSU 管理器允许本应用，然后重试。</string>
+    <string name="su_auth_open_manager">打开 KernelSU 管理器</string>
+    <string name="su_auth_retry">重试</string>
     <string name="check_already_rooted">设备当前不是 root（已 root 会跳过重复利用）</string>
     <string name="check_kernelsu_manager">已安装 KernelSU 管理器（提供 ksud）</string>
     <string name="export_share">分享偏移</string>

@@ -22,6 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.ghostlock.app.GhostlockApplication
+import com.ghostlock.app.data.ManagerScanner
 import com.ghostlock.app.R
 import java.io.File
 
@@ -116,6 +117,8 @@ class MainActivity : ComponentActivity() {
 
             is GhostlockEffect.InstallApk -> installApk(effect.path)
 
+            GhostlockEffect.OpenKernelSuManager -> openKernelSuManager()
+
             is GhostlockEffect.KeepScreenAwake -> if (effect.enabled) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             } else {
@@ -129,6 +132,24 @@ class MainActivity : ComponentActivity() {
      * `file://` URIs have been rejected since N, and the installer needs the
      * read grant, so the path comes from our FileProvider.
      */
+    /**
+     * Opens whichever KernelSU-family manager is installed so the user can
+     * grant this app root. No manager present means the grant UI does not
+     * exist yet: fall back to staging the bundled manager APK.
+     */
+    private fun openKernelSuManager() {
+        val launch = ManagerScanner.BUILTIN
+            .asSequence()
+            .mapNotNull { packageManager.getLaunchIntentForPackage(it) }
+            .firstOrNull()
+        if (launch == null) {
+            viewModel.onFetchKernelSuManager()
+            return
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(launch)
+    }
+
     private fun installApk(path: String) {
         val file = File(path)
         if (!file.isFile) {
@@ -206,6 +227,8 @@ private fun GhostlockRoute(
             override fun onPickModuleZip() = viewModel.onPickModuleZip()
             override fun onFetchKernelSuManager() = viewModel.onFetchKernelSuManager()
             override fun onFetchVectorManager() = viewModel.onFetchVectorManager()
+            override fun onOpenKernelSuManager() = viewModel.onOpenKernelSuManager()
+            override fun onRetrySuAuthorization() = viewModel.onRetrySuAuthorization()
             override fun onDetectComponents() = viewModel.onDetectComponents()
             override fun onCloseManagerPicker() = viewModel.onCloseManagerPicker()
             override fun onManagerSelected(pkg: String?) = viewModel.onManagerSelected(pkg)

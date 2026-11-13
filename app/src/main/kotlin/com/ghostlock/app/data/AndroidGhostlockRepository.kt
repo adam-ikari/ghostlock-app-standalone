@@ -834,6 +834,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             ComponentDetector.detectAll(appContext, appContext.packageManager, appContext.packageName)
         }
 
+    override suspend fun suGranted(): Boolean =
+        withContext(Dispatchers.IO) { ComponentDetector.suGranted() }
+
     override suspend fun deviceHasRoot(): Boolean =
         withContext(Dispatchers.IO) { ComponentDetector.moduleActive(appContext) }
 

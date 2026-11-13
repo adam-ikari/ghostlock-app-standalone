@@ -98,6 +98,9 @@ interface GhostlockRepository {
      * one is present, because the KernelSU module it would load is already
      * loaded. The probe prefers `/proc/modules` and falls back to `su -c 'id -u'`.
      */
+    /** Whether this app context holds a KernelSU `su` grant. */
+    suspend fun suGranted(): Boolean
+
     suspend fun deviceHasRoot(): Boolean
 
     /**

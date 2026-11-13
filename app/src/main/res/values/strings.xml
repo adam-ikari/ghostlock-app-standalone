@@ -84,6 +84,11 @@
     <string name="check_state_optional">Optional — the run still works, without module loading</string>
     <string name="check_kernel">Kernel supported</string>
     <string name="check_profile">Profile matched and valid</string>
+    <string name="check_su_granted">KernelSU root grant for GhostLock</string>
+    <string name="su_auth_title">Grant root to GhostLock</string>
+    <string name="su_auth_message">KernelSU has not allowed GhostLock to run su yet, so activating Vector would fail. Open the KernelSU manager, allow this app, then retry.</string>
+    <string name="su_auth_open_manager">Open KernelSU manager</string>
+    <string name="su_auth_retry">Retry</string>
     <string name="check_already_rooted">Device is not rooted yet (a rooted device skips the exploit)</string>
     <string name="check_kernelsu_manager">KernelSU manager installed (supplies ksud)</string>
     <string name="export_share">Share offsets</string>

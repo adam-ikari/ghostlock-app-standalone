@@ -44,6 +44,9 @@ sealed interface GhostlockEffect {
 
     /** Hand a downloaded APK to the system package installer. */
     data class InstallApk(val path: String) : GhostlockEffect
+
+    /** Open the KernelSU manager so the user can grant this app root. */
+    data object OpenKernelSuManager : GhostlockEffect
 }
 
 private const val OverwriteSummaryLimit = 12
@@ -54,6 +57,7 @@ internal object RunCheckIds {
     const val PROFILE = "profile"
     const val KERNELSU_MANAGER = "kernelsu_manager"
     const val ALREADY_ROOTED = "already_rooted"
+    const val SU_GRANTED = "su_granted"
 }
 
 enum class DocumentRequest {
@@ -967,7 +971,41 @@ class GhostlockViewModel(
 
     /** Install the Zygisk / Vector stack, restart zygote, start the Vector
      *  daemon and verify. Requires temporary root to already be present. */
-    fun onActivateFramework() = runExploit(phase = "activate", needsRoot = true)
+    fun onActivateFramework() {
+        viewModelScope.launch {
+            /* The activate phase execs `su` from this process: without the
+               KernelSU grant the script dies with ENOENT and the failure reads
+               as a broken step. Probe first, then guide the user instead. */
+            val granted = withContext(Dispatchers.IO) {
+                runCatching { repository.suGranted() }.getOrDefault(false)
+            }
+            mutableState.update { it.copy(suGranted = granted) }
+            if (!granted) {
+                promptSuAuthorization()
+                return@launch
+            }
+            runExploit(phase = "activate", needsRoot = true)
+        }
+    }
+
+    /** Asks the user to grant GhostLock root in the KernelSU manager. */
+    private fun promptSuAuthorization() {
+        mutableState.update {
+            it.copy(
+                dialogVisible = true,
+                dialogType = DialogType.SU_AUTH,
+                dialogTitleRes = R.string.su_auth_title,
+            )
+        }
+    }
+
+    fun onOpenKernelSuManager() {
+        send(GhostlockEffect.OpenKernelSuManager)
+    }
+
+    fun onRetrySuAuthorization() {
+        viewModelScope.launch { refreshSnapshot() }
+    }
 
     private fun runExploit(phase: String, needsRoot: Boolean) {
         val current = state.value
@@ -1215,6 +1253,11 @@ class GhostlockViewModel(
         val vectorManager = withContext(Dispatchers.IO) {
             runCatching { repository.vectorManagerInstalled() }.getOrDefault(false)
         }
+        /* `su` from this app context is what the activate phase execs; without
+           the KernelSU grant it fails with ENOENT and the step looks broken. */
+        val suGranted = withContext(Dispatchers.IO) {
+            runCatching { repository.suGranted() }.getOrDefault(false)
+        }
         /* Probe the root state directly: the native log line only appears once
            the exploit has already started, so it cannot gate the button. */
         alreadyRooted = withContext(Dispatchers.IO) {
@@ -1245,11 +1288,13 @@ class GhostlockViewModel(
                 vectorManagerInstalled = vectorManager,
                 rootActive = alreadyRooted,
                 vectorActive = vectorReady,
+                suGranted = suGranted,
                 runChecks = runChecksOf(
                     snapshot = snapshot,
                     hasProfile = loaded?.hasProfile == true,
                     invalidPaths = loaded?.invalidPaths ?: emptySet(),
                     managers = managers,
+                    suGranted = suGranted,
                 ),
             )
         }
@@ -1284,6 +1329,7 @@ class GhostlockViewModel(
         hasProfile: Boolean,
         invalidPaths: Set<String>,
         managers: List<ManagerScanner.Candidate>,
+        suGranted: Boolean,
     ): List<com.ghostlock.app.domain.model.RunCheck> = buildList {
         add(
             com.ghostlock.app.domain.model.RunCheck(
@@ -1303,6 +1349,16 @@ class GhostlockViewModel(
             com.ghostlock.app.domain.model.RunCheck(
                 id = RunCheckIds.KERNELSU_MANAGER,
                 ok = managers.any { it.hasKsud },
+                blocking = false,
+            ),
+        )
+        add(
+            com.ghostlock.app.domain.model.RunCheck(
+                id = RunCheckIds.SU_GRANTED,
+                ok = suGranted,
+                /* Advisory: the root phase does not need `su`, only the
+                   activate phase does, and KernelSU grants on first request.
+                   The activate entry prompts instead of greying the step. */
                 blocking = false,
             ),
         )

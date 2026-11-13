@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import com.ghostlock.app.data.ManagerScanner
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * Detects whether the three moving parts of the root stack are in place,
@@ -186,11 +187,23 @@ object ComponentDetector {
      * grant. Mirrors `handoff_probe.cpp::ksu_root_owned`, so both report the
      * same thing on the same device.
      */
-    private fun suReturnsZero(): Boolean = runCatching {
+    private fun suReturnsZero(): Boolean = suGranted()
+
+    /**
+     * `true` when this app context is allowed to run a command through `su`,
+     * i.e. the KernelSU manager granted GhostLock root.
+     *
+     * KernelSU decides that grant interactively: an unauthorised request parks
+     * the process until the user answers its own prompt, so the wait is
+     * bounded — a UI refresh must never hang on that dialog.
+     */
+    fun suGranted(): Boolean = runCatching {
         val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "id -u"))
-        val text = proc.inputStream.bufferedReader().readText().trim()
-        proc.waitFor()
-        text == "0"
+        if (!proc.waitFor(3, TimeUnit.SECONDS)) {
+            proc.destroyForcibly()
+            return@runCatching false
+        }
+        proc.inputStream.bufferedReader().readText().trim() == "0"
     }.getOrDefault(false)
 
     /**
