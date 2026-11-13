@@ -163,6 +163,6 @@ GhostLock 是安全研究工具，利用公开披露的内核漏洞（CVE-2026-4
 许可全文：[GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html)。疑问请通过 [GitHub Issues](https://github.com/adam-ikari/ghostlock-app-standalone/issues) 联系。
 
 <style>
-.dl-btn{display:inline-flex;align-items:center;gap:8px;margin:20px 0 28px;padding:0 28px;height:50px;border-radius:10px;font-weight:600;font-size:16px;background:var(--vp-button-brand-bg);color:var(--vp-button-brand-text);border:1px solid var(--vp-button-brand-border);text-decoration:none;transition:background .2s}
-.dl-btn:hover{background:var(--vp-button-brand-hover-bg);color:var(--vp-button-brand-hover-text)}
+.dl-btn{display:inline-flex;align-items:center;gap:8px;margin:20px 0 28px;padding:0 28px;height:50px;border-radius:10px;font-weight:600;font-size:16px;background:var(--vp-button-brand-bg);color:#fff;border:1px solid var(--vp-button-brand-border);text-decoration:none;transition:background .2s}
+.dl-btn:hover{background:var(--vp-button-brand-hover-bg);color:#fff}
 </style>
