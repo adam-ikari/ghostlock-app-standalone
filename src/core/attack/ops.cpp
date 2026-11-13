@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <linux/perf_event.h>
@@ -233,11 +234,6 @@ namespace ghostlock::attack {
          * matches the file. Renaming keeps the old inode alive for the reader. */
         const std::string script_path = config::runtime_config_snapshot().root_script_path;
         const std::string script_tmp = script_path + ".tmp";
-        support::UniqueFd sfd(open(script_tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0755));
-        if (!sfd.valid()) {
-            pr_warning("open root script failed path=%s errno=%d\n", script_tmp.c_str(), errno);
-            return;
-        }
 
         /* The root phase exists to load KernelSU and nothing else. If it
          * carries a module list it enters the install branch, which runs
@@ -1438,10 +1434,37 @@ namespace ghostlock::attack {
             pr_warning("root script too long\n");
             return;
         }
-        if (write(sfd.get(), script.data(), static_cast<size_t>(n)) != n) {
-            pr_warning("write root script failed errno=%d\n", errno);
+        /* Write, fsync, then read the bytes back and compare. Trusting
+         * write()'s return value is not enough: a truncated or stale file only
+         * shows up on the device as an unrelated shell error. Two attempts,
+         * then abort rather than hand over a script nobody verified. */
+        const auto write_and_verify = [&]() -> bool {
+            const size_t len = static_cast<size_t>(n);
+            support::UniqueFd fd(open(script_tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0755));
+            if (!fd.valid()) return false;
+            if (write(fd.get(), script.data(), len) != static_cast<ssize_t>(len)) return false;
+            if (fsync(fd.get()) != 0) return false;
+            fd.reset();
+            support::UniqueFd rfd(open(script_tmp.c_str(), O_RDONLY));
+            if (!rfd.valid()) return false;
+            std::string back(len, '\0');
+            size_t got = 0;
+            while (got < len) {
+                const ssize_t r = read(rfd.get(), back.data() + got, len - got);
+                if (r <= 0) return false;
+                got += static_cast<size_t>(r);
+            }
+            /* A byte past the expected length means a stale tail survived. */
+            char extra = 0;
+            if (read(rfd.get(), &extra, 1) > 0) return false;
+            return std::memcmp(back.data(), script.data(), len) == 0;
+        };
+        if (!write_and_verify() && !write_and_verify()) {
+            pr_warning("root script write/verify failed path=%s bytes=%d errno=%d\n", script_tmp.c_str(), n,
+                       errno);
+            unlink(script_tmp.c_str());
+            return;
         }
-        sfd.reset();
         if (rename(script_tmp.c_str(), script_path.c_str()) != 0) {
             pr_warning("rename root script failed path=%s errno=%d\n", script_path.c_str(), errno);
             unlink(script_tmp.c_str());
