@@ -225,11 +225,17 @@ namespace ghostlock::attack {
 
     void write_root_script(void) {
         std::string script(65536, '\0');
-        support::UniqueFd sfd(
-            open((config::runtime_config_snapshot().root_script_path.c_str()), O_WRONLY | O_CREAT | O_TRUNC, 0755));
+        /* Write a sibling and rename into place. A supervisor left over from a
+         * previous run may still be executing this path, and the shell reads
+         * the script incrementally by byte offset: truncating it in place
+         * swaps the bytes underneath and surfaces as a garbled command (e.g.
+         * "not: inaccessible or not found") at a line number that no longer
+         * matches the file. Renaming keeps the old inode alive for the reader. */
+        const std::string script_path = config::runtime_config_snapshot().root_script_path;
+        const std::string script_tmp = script_path + ".tmp";
+        support::UniqueFd sfd(open(script_tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0755));
         if (!sfd.valid()) {
-            pr_warning("open root script failed path=%s errno=%d\n",
-                       (config::runtime_config_snapshot().root_script_path.c_str()), errno);
+            pr_warning("open root script failed path=%s errno=%d\n", script_tmp.c_str(), errno);
             return;
         }
 
@@ -1436,9 +1442,13 @@ namespace ghostlock::attack {
             pr_warning("write root script failed errno=%d\n", errno);
         }
         sfd.reset();
-        chmod((config::runtime_config_snapshot().root_script_path.c_str()), 0755);
-        pr_info("root script written path=%s bytes=%d\n", (config::runtime_config_snapshot().root_script_path.c_str()),
-                n);
+        if (rename(script_tmp.c_str(), script_path.c_str()) != 0) {
+            pr_warning("rename root script failed path=%s errno=%d\n", script_path.c_str(), errno);
+            unlink(script_tmp.c_str());
+            return;
+        }
+        chmod(script_path.c_str(), 0755);
+        pr_info("root script written path=%s bytes=%d\n", script_path.c_str(), n);
     }
 
     /* Find a task through perf sample records. */
