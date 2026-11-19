@@ -7,9 +7,9 @@ titleTemplate: false
 
 **Android 临时 root，一键执行。** 利用 CVE-2026-43499 内核 futex use-after-free，在不解锁 bootloader、不刷 boot 镜像的前提下取得临时 root，并在内存中 late-load KernelSU。重启即失效，无残留。
 
-<a class="dl-btn" href="apk/GhostLock-v1.2(650)-arm64-v8a-release.apk" download>⬇ 下载 GhostLock v1.2 (650) — Titan 2 专用 (APK, 24.6 MB)</a>
+<a class="dl-btn" href="apk/GhostLock-v1.2(651)-arm64-v8a-release.apk" download>⬇ 下载 GhostLock v1.2 (651) — Titan 2 专用 (APK, 24.6 MB)</a>
 
-<p style="text-align:center;color:var(--vp-c-text-2);font-size:14px;margin-top:-4px">版本 <strong>v1.2 (versionCode 650)</strong> · 构建日期 2026-11-13 · 仅适配 <strong>Unihertz Titan 2</strong></p>
+<p style="text-align:center;color:var(--vp-c-text-2);font-size:14px;margin-top:-4px">版本 <strong>v1.2 (versionCode 651)</strong> · 构建日期 2026-11-19 · 仅适配 <strong>Unihertz Titan 2</strong></p>
 
 :::: danger 下载前必读
 **本版本只适配 Unihertz Titan 2**（内核 `6.1.145-android14-11-gbd17012cc2f7-ab14044926`）。native 按 `uname -r` 精确匹配 profile，机型或内核版本不符时 app 会在「运行前检查」处拒绝运行，不会执行 exploit。
@@ -32,7 +32,7 @@ titleTemplate: false
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | v1.2 (versionCode 650) |
+| 版本 | v1.2 (versionCode 651) |
 | 支持机型 | **仅 Unihertz Titan 2** |
 | 内核要求 | `6.1.145-android14-11-gbd17012cc2f7-ab14044926`（精确匹配） |
 | 架构 | arm64-v8a |
@@ -44,8 +44,8 @@ titleTemplate: false
 校验：
 
 ```bash
-sha256sum GhostLock-v1.2\(650\)-arm64-v8a-release.apk
-# 572ce42f83612a897514f5faba402c6d1b487da21c3ec66d238a829669a5233f
+sha256sum GhostLock-v1.2\(651\)-arm64-v8a-release.apk
+# e5251d7262171419c540154ba4f5792553e508f3b95f362d7fff30b2dc9de228
 ```
 
 ## 使用教程
@@ -62,16 +62,16 @@ sha256sum GhostLock-v1.2\(650\)-arm64-v8a-release.apk
 
 打开 GhostLock：若检测到未安装，主页会出现「需要安装配套应用」卡片，点 KernelSU 管理器那一行即可安装（APK 已内置，无需下载）。这是加载 Zygisk / LSPosed 模块的前提：不装也能拿到 root，但模块无法加载。
 
-**② 安装 Vector 管理器**（建议）
+**② 安装 Vector 管理器**（必需）
 
-同一张引导卡片里，点 Vector 管理器那一行安装；APK 从内置 Vector zip 中提取。安装后可在 Vector 中启用 Xposed 模块。
+同一张引导卡片里，点 Vector 管理器那一行安装；APK 从内置 Vector zip 中提取。未安装时「激活 Vector」会提示安装，安装后才能继续。
 
 ### 执行提权
 
 打开 GhostLock，主页「运行前检查」面板会逐项校验内核、profile 和管理器。全部满足后，按顺序操作：
 
 - **获取 root**（必需）— 运行提权，几秒完成，不会重启设备。
-- **激活 Vector**（必需）— 自动部署内置 ReZygisk + Vector 模块并加载，系统就绪后自动继续。需要先完成「获取 root」。过程中**屏幕会闪烁两次**，第二次通常在第一次之后 **10 秒左右**出现（系统重启完成即继续，不必等待固定时长），属正常现象，请保持 app 前台。
+- **激活 Vector**（必需）— 自动部署内置 ReZygisk + Vector 模块并加载，系统就绪后自动继续。需要先完成「获取 root」。点这一步前 app 会检查 KernelSU 是否已授权 GhostLock；若出现授权提示，点「重试」发起请求，并在 KernelSU 弹窗中点「允许」。过程中**屏幕会闪烁两次**，第二次通常在第一次之后 **10 秒左右**出现（系统重启完成即继续，不必等待固定时长），属正常现象，请保持 app 前台。
 
 ::: tip 激活过程说明
 激活 Vector 时屏幕会**闪烁两次**：第一次是注入 zygote，第二次是 Vector daemon 重启 system_server。
@@ -132,7 +132,7 @@ sha256sum GhostLock-v1.2\(650\)-arm64-v8a-release.apk
 
 ## 支持设备
 
-**本版本（v1.2 / 650）只随附 Unihertz Titan 2 的 profile**，内核
+**本版本（v1.2 / 651）只随附 Unihertz Titan 2 的 profile**，内核
 `6.1.145-android14-11-gbd17012cc2f7-ab14044926`。
 
 profile 目录里可能还保留其他上游已验证机型的文件，但它们不属于本次发布范围，
