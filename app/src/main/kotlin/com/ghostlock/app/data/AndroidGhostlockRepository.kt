@@ -24,6 +24,7 @@ import com.ghostlock.app.domain.repository.ProfileConfigController
 import com.ghostlock.app.runtime.ComponentDetector
 import com.ghostlock.app.runtime.ComponentFetcher
 import com.ghostlock.app.runtime.LspdModuleStaging
+import com.ghostlock.app.runtime.RootBootGuard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -66,7 +67,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         /** Publishing retries while the shared volume is still mounting. */
         const val PUBLISH_ATTEMPTS = 15
         const val PUBLISH_RETRY_MS = 1_000L
-        const val LspdStackDirectory = "modules"
 
         /* U01-S14: per-run KernelSU log name; the resolved path travels to
          * the native process via GHOSTLOCK_KSU_LOG. */
@@ -173,37 +173,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             forceAttackTest = forceAttackTest,
         )
     }
-
-    /**
-     * Stages the Zygisk / LSPosed module zips next to the native runtime home.
-     *
-     * The native root script (the only uid-0 step after the exploit) installs
-     * them and brings the framework up in the right order; the app itself is
-     * not root and cannot do that part.
-     */
-    private suspend fun stageLspdStackModules(onLog: (String) -> Unit) =
-        withContext(Dispatchers.IO) {
-            val target = File(filesDir, LspdStackDirectory)
-            if (!target.isDirectory && !target.mkdirs()) {
-                onLog("<k> warning: cannot create ${target.absolutePath}")
-                return@withContext
-            }
-            val names = appContext.assets.list(LspdStackAssetDir).orEmpty()
-            for (name in names) {
-                if (!name.endsWith(".zip")) continue
-                val out = File(target, name)
-                // Always (re)stage: `adb install -r` keeps files/modules/, so
-                // a stale zip from the previous APK would otherwise be served
-                // instead of the new asset. Assets are small and the native
-                // install step short-circuits when already activated.
-                runCatching {
-                    appContext.assets.open("$LspdStackAssetDir/$name").use { input ->
-                        out.outputStream().use { input.copyTo(it) }
-                    }
-                }.onFailure { onLog("<k> warning: cannot stage $name: ${it.message}") }
-                    .onSuccess { onLog("<k> staged module $name (${out.length()} bytes)") }
-            }
-        }
 
     /**
      * The module directory to hand to the native root script, or null when the
@@ -624,7 +593,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
              * right after the late-load, so the zips have to be in place before
              * the native starts. Publishing is opt-in: with no component
              * packages selected the native skips the stack entirely. */
-            stageLspdStackModules(onLog)
             val publishedModules = publishLspdModules()
             onLog("<k> lspd publish: ${lspdPublishDiagnostics()}")
             if (publishedModules != null) {
@@ -754,12 +722,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     override suspend fun readDocument(uri: String): String =
         appContext.contentResolver.openInputStream(uri.toUri())?.bufferedReader()?.use { it.readText() } ?: throw IOException("cannot open $uri")
 
-    override suspend fun stageModuleZip(uri: String, name: String): String {
-        val dir = File(filesDir, LspdStackDirectory)
-        if (!dir.isDirectory) dir.mkdirs()
-        return cacheDocument(uri, "$LspdStackDirectory/$name")
-    }
-
     override suspend fun fetchKernelSuManager(onLog: (String) -> Unit): String? =
         withContext(Dispatchers.IO) {
             /* The device cannot reach GitHub itself, so the manager APK ships
@@ -839,6 +801,19 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override suspend fun deviceHasRoot(): Boolean =
         withContext(Dispatchers.IO) { ComponentDetector.moduleActive(appContext) }
+
+    override suspend fun ksudReady(): Boolean =
+        withContext(Dispatchers.IO) { runCatching { resolveKsudPath { } != null }.getOrDefault(false) }
+
+    override suspend fun rootEstablishedInThisBoot(): Boolean =
+        withContext(Dispatchers.IO) {
+            val currentBootId = runCatching {
+                File("/proc/sys/kernel/random/boot_id").readText().trim()
+            }.getOrNull().takeIf { !it.isNullOrBlank() }
+            if (currentBootId == null) return@withContext false
+            val status = runCatching { File(filesDir, ".ghostlock_status").readText() }.getOrNull()
+            RootBootGuard.matches(status, currentBootId)
+        }
 
     override suspend fun vectorReady(): Boolean =
         withContext(Dispatchers.IO) { ComponentDetector.vectorReady(appContext) }

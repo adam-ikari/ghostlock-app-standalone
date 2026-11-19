@@ -33,6 +33,38 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Which manager install a permission/settings round-trip belongs to. */
+enum class PendingInstallAction { NONE, KERNELSU_MANAGER, VECTOR_MANAGER }
+
+enum class ActivationFailure { NONE, NO_KSUD, ROOT_NOT_ESTABLISHED, NATIVE_FAILED, INJECTION_GATE_TIMEOUT, UNKNOWN }
+
+/** Pure authority for classifying a failed activate/root pass from its log tail. */
+internal object ActivationFailureClassifier {
+    fun classify(phase: String, exitCode: Int, logTail: String): ActivationFailure {
+        if (exitCode == 0) return ActivationFailure.NONE
+        val tail = logTail.lowercase()
+        return when {
+            "no ksud found" in tail -> ActivationFailure.NO_KSUD
+            "injection gate failed" in tail || "injection gate timeout" in tail ->
+                ActivationFailure.INJECTION_GATE_TIMEOUT
+            "root is not ready" in tail ||
+                ("boot_id" in tail && "mismatch" in tail && "profile release mismatch" !in tail) ->
+                ActivationFailure.ROOT_NOT_ESTABLISHED
+            phase == "activate" -> ActivationFailure.NATIVE_FAILED
+            else -> ActivationFailure.UNKNOWN
+        }
+    }
+}
+
+internal fun ActivationFailure.diagnosticMessageRes(): Int = when (this) {
+    ActivationFailure.NONE -> R.string.su_auth_diagnostic_message
+    ActivationFailure.NO_KSUD -> R.string.activation_failure_no_ksud
+    ActivationFailure.ROOT_NOT_ESTABLISHED -> R.string.activation_failure_root_not_established
+    ActivationFailure.NATIVE_FAILED -> R.string.activation_failure_native_failed
+    ActivationFailure.INJECTION_GATE_TIMEOUT -> R.string.activation_failure_injection_gate_timeout
+    ActivationFailure.UNKNOWN -> R.string.activation_failure_unknown
+}
+
 sealed interface GhostlockEffect {
     data class PickDocument(val request: DocumentRequest) : GhostlockEffect
     data object PickDebugFolder : GhostlockEffect
@@ -43,7 +75,10 @@ sealed interface GhostlockEffect {
     data class KeepScreenAwake(val enabled: Boolean) : GhostlockEffect
 
     /** Hand a downloaded APK to the system package installer. */
-    data class InstallApk(val path: String) : GhostlockEffect
+    data class InstallApk(
+        val path: String,
+        val pending: PendingInstallAction = PendingInstallAction.NONE,
+    ) : GhostlockEffect
 
     /** Open the KernelSU manager so the user can grant this app root. */
     data object OpenKernelSuManager : GhostlockEffect
@@ -62,7 +97,6 @@ internal object RunCheckIds {
 
 enum class DocumentRequest {
     ImportOffsetsHocon, ImportOffsetsJson, BootImage, XblImage, PayloadImage, UefiImage, VendorBootImage,
-    ModuleZip,
 }
 
 /** Options offered by [promptBootAttach], in display order. VENDOR_BOOT is
@@ -73,6 +107,7 @@ private enum class ParseDialogStage { Mode, Attach }
 
 class GhostlockViewModel(
     private val repository: GhostlockRepository,
+    private val stringResolver: (Int) -> String = { "resource:$it" },
 ) : ViewModel() {
     private val effectChannel = Channel<GhostlockEffect>(Channel.BUFFERED)
     private val mutableState = MutableStateFlow(GhostlockUiState())
@@ -93,7 +128,11 @@ class GhostlockViewModel(
 
     val state = mutableState.asStateFlow()
     val effects = effectChannel.receiveAsFlow()
+    val activationFailure = MutableStateFlow(ActivationFailure.NONE)
+    val ksudReady = MutableStateFlow(false)
+    val rootEstablishedInThisBoot = MutableStateFlow(false)
 
+    private var pendingInstallAction = PendingInstallAction.NONE
     private var kernelSnapshot: KernelSnapshot? = null
     private var pendingParseWithXbl = false
     private var pendingParseWithUefi = false
@@ -860,13 +899,6 @@ class GhostlockViewModel(
 
 
     /**
-     * Picks a Zygisk / LSPosed module zip (official releases) to install.
-     *
-     * The app ships neither: both are GPL-3.0 while this app is Apache-2.0.
-     */
-    fun onPickModuleZip() = send(GhostlockEffect.PickDocument(DocumentRequest.ModuleZip))
-
-    /**
      * Copies the bundled KernelSU manager APK out of `assets/` and opens the
      * package installer.
      *
@@ -888,7 +920,7 @@ class GhostlockViewModel(
                 appendLog("KernelSU manager: failed (see the lines above)")
                 send(GhostlockEffect.Toast(R.string.module_fetch_failed))
             } else {
-                send(GhostlockEffect.InstallApk(path))
+                send(GhostlockEffect.InstallApk(path, PendingInstallAction.KERNELSU_MANAGER))
             }
         }
     }
@@ -906,7 +938,7 @@ class GhostlockViewModel(
                 appendLog("Vector manager: failed (see the lines above)")
                 send(GhostlockEffect.Toast(R.string.module_fetch_failed))
             } else {
-                send(GhostlockEffect.InstallApk(path))
+                send(GhostlockEffect.InstallApk(path, PendingInstallAction.VECTOR_MANAGER))
             }
         }
     }
@@ -965,36 +997,59 @@ class GhostlockViewModel(
     }
 
 
+    /** Explains a greyed-out setup step without starting the exploit. */
+    fun onSetupStepBlocked(step: Int) {
+        val current = state.value
+        if (current.running || current.setupBusy) {
+            send(GhostlockEffect.Toast(R.string.setup_busy))
+            return
+        }
+        if (step == 2 && !current.rootActive) {
+            send(GhostlockEffect.Toast(R.string.step_root_required))
+            return
+        }
+        onProfileInvalid()
+    }
+
     /** Temporary root exploit + late-load. Idempotent: if root is already
      *  present (this run or carried over) the chain is a no-op. */
     fun onGetRoot() = runExploit(phase = "root", needsRoot = false)
 
     /** Install the Zygisk / Vector stack, restart zygote, start the Vector
-     *  daemon and verify. Requires temporary root to already be present. */
+     *  daemon and verify. Requires an explicit KernelSU su grant first. */
     fun onActivateFramework() {
-        viewModelScope.launch {
-            /* The activate phase execs `su` from this process: without the
-               KernelSU grant the script dies with ENOENT and the failure reads
-               as a broken step. Probe first, then guide the user instead. */
-            val granted = withContext(Dispatchers.IO) {
-                runCatching { repository.suGranted() }.getOrDefault(false)
+        viewModelScope.launch(Dispatchers.IO) {
+            val vectorInstalled = runCatching { repository.vectorManagerInstalled() }.getOrDefault(false)
+            if (!vectorInstalled) {
+                mutableState.update {
+                    it.copy(
+                        dialogVisible = true,
+                        dialogType = DialogType.MANAGERS,
+                        dialogTitleRes = R.string.manager_guide_title,
+                    )
+                }
+                return@launch
             }
-            mutableState.update { it.copy(suGranted = granted) }
+            val granted = runCatching { repository.suGranted() }.getOrDefault(false)
             if (!granted) {
-                promptSuAuthorization()
+                promptSuAuthorization(R.string.su_auth_required_message)
                 return@launch
             }
             runExploit(phase = "activate", needsRoot = true)
         }
     }
 
-    /** Asks the user to grant GhostLock root in the KernelSU manager. */
-    private fun promptSuAuthorization() {
+    /** Shows the activation diagnostic and the real retry action. */
+    private fun promptSuAuthorization(
+        messageRes: Int,
+        titleRes: Int = R.string.su_auth_title,
+    ) {
         mutableState.update {
             it.copy(
                 dialogVisible = true,
                 dialogType = DialogType.SU_AUTH,
-                dialogTitleRes = R.string.su_auth_title,
+                dialogTitleRes = titleRes,
+                dialogMessageRes = messageRes,
             )
         }
     }
@@ -1003,8 +1058,39 @@ class GhostlockViewModel(
         send(GhostlockEffect.OpenKernelSuManager)
     }
 
+    /** Re-probe, then actually rerun the activate phase. */
     fun onRetrySuAuthorization() {
-        viewModelScope.launch { refreshSnapshot() }
+        viewModelScope.launch {
+            refreshSnapshot()
+            onActivateFramework()
+        }
+    }
+
+    /** Remembers which install a settings/installer round-trip belongs to. */
+    fun onInstallerReturned(pending: PendingInstallAction) {
+        pendingInstallAction = pending
+        mutableState.update {
+            it.copy(
+                dialogVisible = true,
+                dialogType = DialogType.INSTALLED_CONTINUE,
+                dialogTitleRes = R.string.install_installed_continue,
+            )
+        }
+    }
+
+    /** Re-fetches the manager selected by [onInstallerReturned] and refreshes state. */
+    fun onContinuePendingInstall() {
+        val pending = pendingInstallAction
+        if (pending == PendingInstallAction.NONE) return
+        pendingInstallAction = PendingInstallAction.NONE
+        viewModelScope.launch(Dispatchers.IO) {
+            when (pending) {
+                PendingInstallAction.KERNELSU_MANAGER -> repository.fetchKernelSuManager { appendLog(it) }
+                PendingInstallAction.VECTOR_MANAGER -> repository.fetchVectorManager { appendLog(it) }
+                PendingInstallAction.NONE -> Unit
+            }
+            refreshSnapshot()
+        }
     }
 
     private fun runExploit(phase: String, needsRoot: Boolean) {
@@ -1063,23 +1149,32 @@ class GhostlockViewModel(
         mutableState.update { it.copy(setupBusy = true, setupState = phase, setupError = null) }
         viewModelScope.launch(Dispatchers.IO) {
             var code = -1
+            val logTail = StringBuilder()
             try {
-                code = runExploitUseCase(pair, ::appendLog, phase)
+                code = runExploitUseCase(pair, { line ->
+                    appendLog(line)
+                    logTail.appendLine(line)
+                }, phase)
                 appendLog(
                     when {
                         code != 0 && phase == "root" -> "result: root phase failed (exit code=$code)"
                         code != 0 && phase == "activate" -> "result: activate phase failed (exit code=$code)"
                         code != 0 && phase == "reboot" -> "result: soft reboot failed (exit code=$code)"
-                        phase == "root" -> "result: root phase finished; activate Vector next"
+                        phase == "root" -> "result: root phase finished"
                         phase == "activate" -> "result: Vector activation finished; verify in background"
                         else -> "result: soft reboot finished"
                     },
                 )
                 appendLog("exit code=$code")
             } finally {
+                val failure = ActivationFailureClassifier.classify(phase, code, logTail.toString())
+                activationFailure.value = failure
                 if (code != 0) {
-                    mutableState.update {
-                        it.copy(setupError = if (phase == "root") "root phase failed" else "$phase phase failed")
+                    val messageRes = failure.diagnosticMessageRes()
+                    val message = stringResolver(messageRes)
+                    mutableState.update { it.copy(setupError = message) }
+                    if (phase == "activate") {
+                        promptSuAuthorization(messageRes, R.string.activation_failure_title)
                     }
                 } else {
                     /* The native script only reports 0 after it verified the
@@ -1173,7 +1268,6 @@ class GhostlockViewModel(
             DocumentRequest.UefiImage -> stageUefi(uri)
             DocumentRequest.VendorBootImage -> stageVendorBoot(uri)
             DocumentRequest.PayloadImage -> stagePayload(uri)
-            DocumentRequest.ModuleZip -> stageModuleZip(uri)
             DocumentRequest.ImportOffsetsHocon, DocumentRequest.ImportOffsetsJson -> Unit
         }
     }
@@ -1184,7 +1278,6 @@ class GhostlockViewModel(
             DocumentRequest.ImportOffsetsHocon, DocumentRequest.ImportOffsetsJson ->
                 importDocuments(uris)
 
-            DocumentRequest.ModuleZip -> uris.firstOrNull()?.let(::stageModuleZip)
             DocumentRequest.BootImage -> uris.firstOrNull()?.let(::stageBoot)
             DocumentRequest.XblImage -> uris.firstOrNull()?.let(::stageXbl)
             DocumentRequest.UefiImage -> uris.firstOrNull()?.let(::stageUefi)
@@ -1257,6 +1350,13 @@ class GhostlockViewModel(
            the KernelSU grant it fails with ENOENT and the step looks broken. */
         val suGranted = withContext(Dispatchers.IO) {
             runCatching { repository.suGranted() }.getOrDefault(false)
+        }
+        /* Diagnostics only: neither result gates activation. */
+        ksudReady.value = withContext(Dispatchers.IO) {
+            runCatching { repository.ksudReady() }.getOrDefault(false)
+        }
+        rootEstablishedInThisBoot.value = withContext(Dispatchers.IO) {
+            runCatching { repository.rootEstablishedInThisBoot() }.getOrDefault(false)
         }
         /* Probe the root state directly: the native log line only appears once
            the exploit has already started, so it cannot gate the button. */
@@ -1551,21 +1651,6 @@ class GhostlockViewModel(
                 appendLog("parse error: ${error.message}")
                 appendLog("result: parse failed")
                 showNotice(R.string.parse_result_title, R.string.parse_failed)
-            }
-        }
-    }
-
-    /** Copies a picked module zip into the runtime home's modules/ directory. */
-    private fun stageModuleZip(uri: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val name = uri.substringAfterLast('/').ifBlank { "module.zip" }
-                val path = repository.stageModuleZip(uri, name)
-                appendLog("module zip staged: $path")
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                appendLog("module zip failed: ${error.message}")
             }
         }
     }

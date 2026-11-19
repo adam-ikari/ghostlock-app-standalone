@@ -174,6 +174,14 @@ class ComponentDetectorTest {
         assertFalse(ComponentDetector.vectorActivated(halfReady, null))
     }
 
+    @Test
+    fun suGrantRowIsDiagnosticOnly() {
+        val row = ComponentDetector.suGrantDiagnostic(granted = false)
+        assertEquals("su_grant", row.key)
+        assertFalse(row.ok)
+        assertTrue(row.detail!!.contains("diagnostic"))
+    }
+
     private companion object {
         const val BOOT_ID = "10138c54-1010-4c13-bf18-a6d5e2615449"
     }

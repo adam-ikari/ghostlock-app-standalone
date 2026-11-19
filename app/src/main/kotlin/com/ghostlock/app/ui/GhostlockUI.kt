@@ -196,7 +196,7 @@ data class GhostlockUiState(
     val setupError: String? = null,
 )
 
-enum class DialogType { NONE, LIST, INPUT, NOTICE, MANAGERS, SU_AUTH }
+enum class DialogType { NONE, LIST, INPUT, NOTICE, MANAGERS, SU_AUTH, INSTALLED_CONTINUE }
 
 data class GhostlockLogLine(val text: String, val color: Int)
 
@@ -204,6 +204,7 @@ interface GhostlockActions {
     fun onGetRoot()
     fun onActivateFramework()
     fun onProfileInvalid()
+    fun onSetupStepBlocked(step: Int)
     fun onCloseExecutionSheet()
     fun onCopyLogs()
     fun onImportOffsetsHocon()
@@ -214,12 +215,12 @@ interface GhostlockActions {
     fun onCpuPairSelected(index: Int)
     fun onSafeModeChanged(enabled: Boolean)
     fun onForceAttackTestChanged(enabled: Boolean)
-    fun onPickModuleZip()
     fun onFetchKernelSuManager()
     fun onDetectComponents()
     fun onFetchVectorManager()
     fun onOpenKernelSuManager()
     fun onRetrySuAuthorization()
+    fun onContinuePendingInstall()
 
     fun onOpenManagerPicker()
     fun onCloseManagerPicker()
@@ -753,7 +754,11 @@ private fun GhostlockDialog(
 
                 DialogType.SU_AUTH -> {
                     Text(
-                        text = stringResource(R.string.su_auth_message),
+                        text = if (state.dialogMessageRes != 0) {
+                            stringResource(state.dialogMessageRes)
+                        } else {
+                            stringResource(R.string.su_auth_diagnostic_message)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         style = MiuixTheme.textStyles.body2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -786,6 +791,12 @@ private fun GhostlockDialog(
                 }
 
                 DialogType.MANAGERS -> {
+                    Text(
+                        text = stringResource(R.string.install_advanced_protection_hint),
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
                     if (!state.kernelSuManagerInstalled) {
                         TextButton(
                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
@@ -797,6 +808,12 @@ private fun GhostlockDialog(
                         )
                     }
                     if (!state.vectorManagerInstalled) {
+                        Text(
+                            text = stringResource(R.string.manager_vector_required_hint),
+                            modifier = Modifier.fillMaxWidth(),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
                         TextButton(
                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                             text = stringResource(R.string.manager_guide_vector),
@@ -806,6 +823,30 @@ private fun GhostlockDialog(
                             },
                         )
                     }
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = stringResource(R.string.manager_prompt_later),
+                        onClick = actions::onDialogDismiss,
+                    )
+                }
+
+                DialogType.INSTALLED_CONTINUE -> {
+                    Text(
+                        text = stringResource(R.string.install_installed_continue),
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    TextButton(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        text = stringResource(R.string.install_installed_continue),
+                        onClick = {
+                            actions.onDialogDismiss()
+                            actions.onContinuePendingInstall()
+                        },
+                    )
                     TextButton(
                         modifier = Modifier.fillMaxWidth(),
                         text = stringResource(R.string.manager_prompt_later),
@@ -976,20 +1017,20 @@ private fun SetupFlowCard(
                 labelRes = R.string.action_get_root,
                 subtitleRes = R.string.step_get_root_desc,
                 done = state.rootActive,
-                enabled = !busy && !profileBlocked,
+                enabled = !busy && !profileBlocked && !state.rootActive,
                 current = !state.rootActive,
                 onClick = actions::onGetRoot,
-                onBlockedClick = actions::onProfileInvalid,
+                onBlockedClick = { actions.onSetupStepBlocked(1) },
             )
             SetupStepButton(
                 index = 2,
                 labelRes = R.string.action_activate_framework,
                 subtitleRes = R.string.step_activate_desc,
                 done = state.vectorActive,
-                enabled = !busy && !profileBlocked && state.rootActive,
+                enabled = !busy && !profileBlocked && state.rootActive && !state.vectorActive,
                 current = state.rootActive && !state.vectorActive,
                 onClick = actions::onActivateFramework,
-                onBlockedClick = actions::onProfileInvalid,
+                onBlockedClick = { actions.onSetupStepBlocked(2) },
                 modifier = Modifier.padding(top = 8.dp),
             )
             state.setupError?.let { error ->
@@ -1037,7 +1078,7 @@ private fun ManagerSetupCard(
             if (!vectorInstalled) {
                 ManagerInstallRow(
                     name = stringResource(R.string.manager_guide_vector),
-                    detail = stringResource(R.string.manager_guide_vector_hint),
+                    detail = stringResource(R.string.manager_vector_required_hint),
                     onClick = onInstallVector,
                 )
             }
@@ -1086,11 +1127,15 @@ private fun SetupStepButton(
     modifier: Modifier = Modifier,
     optional: Boolean = false,
 ) {
-    val bgColor = if (optional) {
+    val bgColor = if (done) {
+        androidx.compose.ui.graphics.Color(0xFF2E7D32)
+    } else if (optional) {
         if (enabled) MiuixTheme.colorScheme.surfaceVariant else MiuixTheme.colorScheme.disabledPrimaryButton
     } else if (enabled) MiuixTheme.colorScheme.primary
     else MiuixTheme.colorScheme.disabledPrimaryButton
-    val fgColor = if (optional && enabled) MiuixTheme.colorScheme.onBackgroundVariant
+    val fgColor = if (done) {
+        androidx.compose.ui.graphics.Color.White
+    } else if (optional && enabled) MiuixTheme.colorScheme.onBackgroundVariant
     else if (enabled) MiuixTheme.colorScheme.onPrimary
     else MiuixTheme.colorScheme.disabledOnPrimaryButton
     val label = "$index. " + stringResource(labelRes) + if (done) "  ✓" else ""
@@ -1100,7 +1145,7 @@ private fun SetupStepButton(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
-            .clickable(enabled = enabled) { onClick() }
+            .clickable(enabled = !done) { if (enabled) onClick() else onBlockedClick() }
             .padding(vertical = 10.dp, horizontal = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

@@ -86,9 +86,12 @@
     <string name="check_profile">Profile matched and valid</string>
     <string name="check_su_granted">KernelSU root grant for GhostLock</string>
     <string name="su_auth_title">Grant root to GhostLock</string>
-    <string name="su_auth_message">KernelSU has not allowed GhostLock to run su yet, so activating Vector would fail. Open the KernelSU manager, allow this app, then retry.</string>
+    <string name="su_auth_required_message">GhostLock has no root grant yet. Tap Retry to send a request, then approve it in the KernelSU prompt. If no prompt appears, open KernelSU manager and check pending requests.</string>
     <string name="su_auth_open_manager">Open KernelSU manager</string>
     <string name="su_auth_retry">Retry</string>
+    <string name="activation_failure_title">Activation failed</string>
+    <string name="setup_busy">A setup step is still running. Wait for it to finish.</string>
+    <string name="step_root_required">Finish step 1 (Get root) first.</string>
     <string name="check_already_rooted">Device is not rooted yet (a rooted device skips the exploit)</string>
     <string name="check_kernelsu_manager">KernelSU manager installed (supplies ksud)</string>
     <string name="export_share">Share offsets</string>
@@ -304,4 +307,15 @@
     <string name="fallback_label">Fallback route</string>
     <string name="fallback_none">None</string>
     <string name="field_fallback_to">fallback_to</string>
+    <string name="install_unknown_sources_required">Allow GhostLock to install apps from unknown sources in Settings, then come back to continue the install.</string>
+    <string name="install_advanced_protection_hint">Android 16 Advanced Protection Mode may block sideloading. Turn it off for this install if the installer is refused.</string>
+    <string name="install_installed_continue">Installer opened. After installing the manager, continue setup.</string>
+    <string name="manager_vector_required_hint">Required: controls the injected framework. Install Vector manager to continue.</string>
+    <string name="su_auth_diagnostic_message">No su grant was detected. Activation will report the failing step; retry reruns activation after you grant access.</string>
+    <string name="install_apk_missing">The APK to install is missing. Re-download it from the app and try again.</string>
+    <string name="activation_failure_no_ksud">ksud not found. Install the KernelSU manager, then retry activation.</string>
+    <string name="activation_failure_root_not_established">Root is not established for this boot. Run Get root, then retry activation.</string>
+    <string name="activation_failure_native_failed">Activation failed in the native step. Check the log and retry after fixing the reported component.</string>
+    <string name="activation_failure_injection_gate_timeout">Injection gate timed out. Reboot, then retry; if it repeats, check module compatibility.</string>
+    <string name="activation_failure_unknown">Activation failed. Check the log and retry.</string>
 </resources>

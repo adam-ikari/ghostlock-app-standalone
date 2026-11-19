@@ -183,6 +183,18 @@ object ComponentDetector {
     }.getOrDefault(false)
 
     /**
+     * Diagnostic-only representation of the unreliable app-domain `su` probe.
+     * Never use [Status.ok] to gate activation: a false negative here only
+     * means the probe could not see the grant, not that root is absent.
+     */
+    fun suGrantDiagnostic(granted: Boolean): Status = Status(
+        key = "su_grant",
+        label = "su grant (diagnostic)",
+        detail = if (granted) "diagnostic: su probe returned 0" else "diagnostic: su probe did not return 0",
+        ok = granted,
+    )
+
+    /**
      * `su -c 'id -u'` printing `0` means this app context already holds a root
      * grant. Mirrors `handoff_probe.cpp::ksu_root_owned`, so both report the
      * same thing on the same device.
@@ -238,6 +250,7 @@ object ComponentDetector {
                 detail = if (active) "active" else "inactive",
                 ok = active,
             ),
+            suGrantDiagnostic(suGranted()),
         )
     }
 }

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.provider.Settings
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Toast
@@ -26,14 +27,37 @@ import com.ghostlock.app.data.ManagerScanner
 import com.ghostlock.app.R
 import java.io.File
 
+internal enum class InstallGateAction { OPEN_INSTALLER, REQUEST_UNKNOWN_SOURCES, MISSING_FILE }
+
+/** Pure gate: package-install permission is a runtime grant, not a manifest declaration. */
+internal object InstallPermissionGate {
+    fun decide(canRequest: Boolean, fileExists: Boolean): InstallGateAction = when {
+        !fileExists -> InstallGateAction.MISSING_FILE
+        !canRequest -> InstallGateAction.REQUEST_UNKNOWN_SOURCES
+        else -> InstallGateAction.OPEN_INSTALLER
+    }
+
+    fun unknownSourcesMessageRes(): List<Int> = listOf(
+        R.string.install_unknown_sources_required,
+        R.string.install_advanced_protection_hint,
+    )
+}
+
 class MainActivity : ComponentActivity() {
     private val viewModel by viewModels<GhostlockViewModel> {
         viewModelFactory {
-            initializer { GhostlockViewModel((application as GhostlockApplication).createRepository()) }
+            initializer {
+                GhostlockViewModel(
+                    (application as GhostlockApplication).createRepository(),
+                    application::getString,
+                )
+            }
         }
     }
 
     private var pendingDocumentRequest: DocumentRequest? = null
+    private var pendingInstallPath: String? = null
+    private var pendingInstallAction: PendingInstallAction = PendingInstallAction.NONE
     private val documentPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         val request = pendingDocumentRequest
         pendingDocumentRequest = null
@@ -80,6 +104,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshStatus()
+        val path = pendingInstallPath ?: return
+        if (!packageManager.canRequestPackageInstalls()) return
+        val action = pendingInstallAction
+        pendingInstallPath = null
+        pendingInstallAction = PendingInstallAction.NONE
+        installApk(path, action)
     }
 
     private fun handleEffect(effect: GhostlockEffect) {
@@ -115,7 +145,7 @@ class MainActivity : ComponentActivity() {
                     ?.setPrimaryClip(ClipData.newPlainText("ghostlock-log", effect.text))
             }
 
-            is GhostlockEffect.InstallApk -> installApk(effect.path)
+            is GhostlockEffect.InstallApk -> installApk(effect.path, effect.pending)
 
             GhostlockEffect.OpenKernelSuManager -> openKernelSuManager()
 
@@ -150,18 +180,44 @@ class MainActivity : ComponentActivity() {
         startActivity(launch)
     }
 
-    private fun installApk(path: String) {
-        val file = File(path)
-        if (!file.isFile) {
-            Toast.makeText(this, R.string.module_fetch_kernelsu_missing, Toast.LENGTH_LONG).show()
-            return
-        }
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        runCatching { startActivity(intent) }.onFailure {
-            Toast.makeText(this, R.string.module_fetch_kernelsu_no_installer, Toast.LENGTH_LONG).show()
+    private fun installApk(path: String, pending: PendingInstallAction) {
+        when (
+            InstallPermissionGate.decide(
+                canRequest = packageManager.canRequestPackageInstalls(),
+                fileExists = File(path).isFile,
+            )
+        ) {
+            InstallGateAction.MISSING_FILE -> {
+                Toast.makeText(this, R.string.install_apk_missing, Toast.LENGTH_LONG).show()
+            }
+
+            InstallGateAction.REQUEST_UNKNOWN_SOURCES -> {
+                pendingInstallPath = path
+                pendingInstallAction = pending
+                val message = InstallPermissionGate.unknownSourcesMessageRes()
+                    .joinToString("\n") { getString(it) }
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                val settings = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName"),
+                )
+                runCatching { startActivity(settings) }.onFailure {
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                }
+            }
+
+            InstallGateAction.OPEN_INSTALLER -> {
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", File(path))
+                val intent = Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                runCatching { startActivity(intent) }.onFailure {
+                    // Only report "no installer" after permission was granted:
+                    // a denial is a settings problem, not a missing installer.
+                    Toast.makeText(this, R.string.module_fetch_kernelsu_no_installer, Toast.LENGTH_LONG).show()
+                }
+                if (pending != PendingInstallAction.NONE) viewModel.onInstallerReturned(pending)
+            }
         }
     }
 
@@ -209,6 +265,7 @@ private fun GhostlockRoute(
             override fun onGetRoot() = viewModel.onGetRoot()
             override fun onActivateFramework() = viewModel.onActivateFramework()
             override fun onProfileInvalid() = viewModel.onProfileInvalid()
+            override fun onSetupStepBlocked(step: Int) = viewModel.onSetupStepBlocked(step)
             override fun onCloseExecutionSheet() = viewModel.onCloseExecutionSheet()
             override fun onCopyLogs() = viewModel.copyLogs()
             override fun onImportOffsetsHocon() = viewModel.importOffsetsHocon()
@@ -224,11 +281,11 @@ private fun GhostlockRoute(
                 viewModel.toggleForceAttackTest(enabled)
 
             override fun onOpenManagerPicker() = viewModel.onOpenManagerPicker()
-            override fun onPickModuleZip() = viewModel.onPickModuleZip()
             override fun onFetchKernelSuManager() = viewModel.onFetchKernelSuManager()
             override fun onFetchVectorManager() = viewModel.onFetchVectorManager()
             override fun onOpenKernelSuManager() = viewModel.onOpenKernelSuManager()
             override fun onRetrySuAuthorization() = viewModel.onRetrySuAuthorization()
+            override fun onContinuePendingInstall() = viewModel.onContinuePendingInstall()
             override fun onDetectComponents() = viewModel.onDetectComponents()
             override fun onCloseManagerPicker() = viewModel.onCloseManagerPicker()
             override fun onManagerSelected(pkg: String?) = viewModel.onManagerSelected(pkg)

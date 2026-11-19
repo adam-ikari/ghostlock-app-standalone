@@ -86,9 +86,12 @@
     <string name="check_profile">profile 已匹配且字段合法</string>
     <string name="check_su_granted">GhostLock 已获 KernelSU 授权（su）</string>
     <string name="su_auth_title">需要授予 root 权限</string>
-    <string name="su_auth_message">KernelSU 尚未允许 GhostLock 使用 su，激活 Vector 会失败。请打开 KernelSU 管理器允许本应用，然后重试。</string>
+    <string name="su_auth_required_message">GhostLock 尚未获得 root 授权。点“重试”发起请求，并在 KernelSU 弹窗中点“允许”；若未弹窗，打开 KernelSU 管理器查看待处理请求。</string>
     <string name="su_auth_open_manager">打开 KernelSU 管理器</string>
     <string name="su_auth_retry">重试</string>
+    <string name="activation_failure_title">激活失败</string>
+    <string name="setup_busy">设置步骤仍在执行，请等待完成。</string>
+    <string name="step_root_required">请先完成第 1 步获取 root。</string>
     <string name="check_already_rooted">设备当前不是 root（已 root 会跳过重复利用）</string>
     <string name="check_kernelsu_manager">已安装 KernelSU 管理器（提供 ksud）</string>
     <string name="export_share">分享偏移</string>
@@ -304,4 +307,15 @@
     <string name="fallback_label">回退路由</string>
     <string name="fallback_none">无</string>
     <string name="field_fallback_to">回退目标</string>
+    <string name="install_unknown_sources_required">请在设置中允许 GhostLock 安装未知来源应用，然后返回继续安装。</string>
+    <string name="install_advanced_protection_hint">Android 16 高级保护模式可能阻止侧载；如安装被拒，请针对本次安装关闭该保护。</string>
+    <string name="install_installed_continue">安装器已打开。安装管理器后继续设置。</string>
+    <string name="manager_vector_required_hint">必需：用于控制注入后的框架。请安装 Vector 管理器后继续。</string>
+    <string name="su_auth_diagnostic_message">未检测到 su 授权。激活会报告失败步骤；授权后重试会重新执行激活。</string>
+    <string name="install_apk_missing">待安装的 APK 已丢失，请在应用内重新获取后重试。</string>
+    <string name="activation_failure_no_ksud">未找到 ksud。请先安装 KernelSU 管理器，然后重试激活。</string>
+    <string name="activation_failure_root_not_established">本次开机尚未建立 root。请先获取 root，然后重试激活。</string>
+    <string name="activation_failure_native_failed">激活在 native 步骤失败。请根据日志修复报告的问题后重试。</string>
+    <string name="activation_failure_injection_gate_timeout">注入门禁等待超时。请重启后重试；若反复出现，检查模块兼容性。</string>
+    <string name="activation_failure_unknown">激活失败。请查看日志后重试。</string>
 </resources>

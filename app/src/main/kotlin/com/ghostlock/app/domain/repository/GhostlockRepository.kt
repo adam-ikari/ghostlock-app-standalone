@@ -55,16 +55,6 @@ interface GhostlockRepository {
     suspend fun cacheDocument(uri: String, fileName: String): String
 
     /**
-     * Copies a picked module zip into the runtime home's modules/ directory.
-     *
-     * The bundled stack is the ReZygisk + Vector pair, shipped inside the APK
-     * under `assets/modules/`; the user may also pick a zip manually, and the
-     * native root script installs whatever is in the staging dir.
-     */
-    suspend fun stageModuleZip(uri: String, name: String): String =
-        cacheDocument(uri, name)
-
-    /**
      * Copies the bundled KernelSU manager APK from `assets/` into the app cache
      * and returns its path, or null when the bundled copy is missing or not a
      * valid APK. The UI hands the path to the package installer: the manager is
@@ -102,6 +92,12 @@ interface GhostlockRepository {
     suspend fun suGranted(): Boolean
 
     suspend fun deviceHasRoot(): Boolean
+
+    /** Non-throwing check that a resolvable `ksud` binary exists. */
+    suspend fun ksudReady(): Boolean
+
+    /** Whether the root script recorded root for this boot id. */
+    suspend fun rootEstablishedInThisBoot(): Boolean
 
     /**
      * Whether the root script's status file records a verified Vector activation
