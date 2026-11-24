@@ -7,9 +7,9 @@ titleTemplate: false
 
 **Android 临时 root，一键执行。** 利用 CVE-2026-43499 内核 futex use-after-free，在不解锁 bootloader、不刷 boot 镜像的前提下取得临时 root，并在内存中 late-load KernelSU。重启即失效，无残留。
 
-<a class="dl-btn" href="apk/GhostLock-v1.2(651)-arm64-v8a-release.apk" download>⬇ 下载 GhostLock v1.2 (651) — Titan 2 专用 (APK, 24.6 MB)</a>
+<a class="dl-btn" href="apk/GhostLock-v1.2(652)-arm64-v8a-release.apk" download>⬇ 下载 GhostLock v1.2 (652) — Titan 2 专用 (APK, 24.6 MB)</a>
 
-<p style="text-align:center;color:var(--vp-c-text-2);font-size:14px;margin-top:-4px">版本 <strong>v1.2 (versionCode 651)</strong> · 构建日期 2026-11-19 · 仅适配 <strong>Unihertz Titan 2</strong></p>
+<p style="text-align:center;color:var(--vp-c-text-2);font-size:14px;margin-top:-4px">版本 <strong>v1.2 (versionCode 652)</strong> · 构建日期 2026-11-24 · 仅适配 <strong>Unihertz Titan 2</strong></p>
 
 :::: danger 下载前必读
 **本版本只适配 Unihertz Titan 2**（内核 `6.1.145-android14-11-gbd17012cc2f7-ab14044926`）。native 按 `uname -r` 精确匹配 profile，机型或内核版本不符时 app 会在「运行前检查」处拒绝运行，不会执行 exploit。
@@ -32,7 +32,7 @@ titleTemplate: false
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | v1.2 (versionCode 651) |
+| 版本 | v1.2 (versionCode 652) |
 | 支持机型 | **仅 Unihertz Titan 2** |
 | 内核要求 | `6.1.145-android14-11-gbd17012cc2f7-ab14044926`（精确匹配） |
 | 架构 | arm64-v8a |
@@ -44,8 +44,8 @@ titleTemplate: false
 校验：
 
 ```bash
-sha256sum GhostLock-v1.2\(651\)-arm64-v8a-release.apk
-# e5251d7262171419c540154ba4f5792553e508f3b95f362d7fff30b2dc9de228
+sha256sum GhostLock-v1.2\(652\)-arm64-v8a-release.apk
+# e924700183527a96f1c269d7601727a9113152b37563f305e8a3cd9afe27d831
 ```
 
 ## 使用教程
@@ -132,7 +132,7 @@ sha256sum GhostLock-v1.2\(651\)-arm64-v8a-release.apk
 
 ## 支持设备
 
-**本版本（v1.2 / 651）只随附 Unihertz Titan 2 的 profile**，内核
+**本版本（v1.2 / 652）只随附 Unihertz Titan 2 的 profile**，内核
 `6.1.145-android14-11-gbd17012cc2f7-ab14044926`。
 
 profile 目录里可能还保留其他上游已验证机型的文件，但它们不属于本次发布范围，
